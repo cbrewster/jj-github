@@ -54,7 +54,7 @@ func (c *Client) GetPullRequestsForBranches(
 
 			// Filter out closed PRs.
 			prs = slices.DeleteFunc(prs, func(pr *github.PullRequest) bool {
-				return pr.ClosedAt != nil
+				return pr.ClosedAt != nil || *pr.Head.Ref != branch
 			})
 
 			if len(prs) == 0 {
@@ -80,7 +80,7 @@ func (c *Client) GetPullRequestsForBranches(
 	return result, nil
 }
 
-type CreatePullRequestOptions struct {
+type PullRequestOptions struct {
 	Title  string
 	Body   string
 	Branch string
@@ -91,12 +91,32 @@ type CreatePullRequestOptions struct {
 func (c *Client) CreatePullRequest(
 	ctx context.Context,
 	repo Repo,
-	opts CreatePullRequestOptions,
+	opts PullRequestOptions,
 ) error {
 	_, _, err := c.client.PullRequests.Create(ctx, repo.Owner, repo.Name, &github.NewPullRequest{
 		Title: &opts.Title,
 		Head:  &opts.Branch,
 		Base:  &opts.Base,
+		Body:  &opts.Body,
+		Draft: &opts.Draft,
+	})
+	return err
+}
+
+func (c *Client) UpdatePullRequest(
+	ctx context.Context,
+	repo Repo,
+	number int,
+	opts PullRequestOptions,
+) error {
+	_, _, err := c.client.PullRequests.Edit(ctx, repo.Owner, repo.Name, number, &github.PullRequest{
+		Title: &opts.Title,
+		Head: &github.PullRequestBranch{
+			Ref: &opts.Branch,
+		},
+		Base: &github.PullRequestBranch{
+			Ref: &opts.Base,
+		},
 		Body:  &opts.Body,
 		Draft: &opts.Draft,
 	})

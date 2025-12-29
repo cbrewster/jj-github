@@ -101,15 +101,30 @@ func main() {
 
 		title, body, _ := strings.Cut(change.Description, "\n")
 
-		if _, ok := prs[change.GitPushBookmark]; !ok {
-			slog.Info("would create PR!", "base", base)
-			gh.CreatePullRequest(ctx, repo, github.CreatePullRequestOptions{
+		if pr, ok := prs[change.GitPushBookmark]; ok {
+			slog.Info("updating pull request")
+			if err := gh.UpdatePullRequest(ctx, repo, *pr.Number, github.PullRequestOptions{
 				Title:  title,
 				Body:   body,
 				Branch: change.GitPushBookmark,
 				Base:   base,
 				Draft:  strings.Contains(strings.ToLower(title), "wip"),
-			})
+			}); err != nil {
+				slog.Error("failed to update pull request", "error", err)
+				os.Exit(1)
+			}
+		} else {
+			slog.Info("creating pull request")
+			if err := gh.CreatePullRequest(ctx, repo, github.PullRequestOptions{
+				Title:  title,
+				Body:   body,
+				Branch: change.GitPushBookmark,
+				Base:   base,
+				Draft:  strings.Contains(strings.ToLower(title), "wip"),
+			}); err != nil {
+				slog.Error("failed to create pull request", "error", err)
+				os.Exit(1)
+			}
 		}
 	}
 }
