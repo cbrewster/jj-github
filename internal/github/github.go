@@ -44,6 +44,7 @@ func (c *Client) GetPullRequestsForBranches(
 	result := make(map[string]*github.PullRequest)
 
 	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(ghConcurrency)
 
 	for _, branch := range branches {
 		eg.Go(func() error {
@@ -92,15 +93,15 @@ func (c *Client) CreatePullRequest(
 	ctx context.Context,
 	repo Repo,
 	opts PullRequestOptions,
-) error {
-	_, _, err := c.client.PullRequests.Create(ctx, repo.Owner, repo.Name, &github.NewPullRequest{
+) (*github.PullRequest, error) {
+	pr, _, err := c.client.PullRequests.Create(ctx, repo.Owner, repo.Name, &github.NewPullRequest{
 		Title: &opts.Title,
 		Head:  &opts.Branch,
 		Base:  &opts.Base,
 		Body:  &opts.Body,
 		Draft: &opts.Draft,
 	})
-	return err
+	return pr, err
 }
 
 func (c *Client) UpdatePullRequest(
@@ -121,6 +122,72 @@ func (c *Client) UpdatePullRequest(
 		Draft: &opts.Draft,
 	})
 	return err
+}
+
+func (c *Client) CreatePullRequestComment(
+	ctx context.Context,
+	repo Repo,
+	prNumber int,
+	body string,
+) error {
+	_, _, err := c.client.Issues.CreateComment(ctx, repo.Owner, repo.Name, prNumber, &github.IssueComment{
+		Body: &body,
+	})
+	return err
+}
+
+func (c *Client) UpdatePullRequestComment(
+	ctx context.Context,
+	repo Repo,
+	commentID int64,
+	body string,
+) error {
+	_, _, err := c.client.Issues.EditComment(ctx, repo.Owner, repo.Name, commentID, &github.IssueComment{
+		Body: &body,
+	})
+	return err
+}
+
+func (c *Client) GetCommentsForPullRequestsWithContents(
+	ctx context.Context,
+	repo Repo,
+	pullRequests []int,
+	contents string,
+) (map[int]*github.IssueComment, error) {
+	var mu sync.Mutex
+	result := make(map[int]*github.IssueComment)
+
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(ghConcurrency)
+
+	for _, prNumber := range pullRequests {
+		eg.Go(func() error {
+			issues, _, err := c.client.Issues.ListComments(ctx, repo.Owner, repo.Name, prNumber, nil)
+			if err != nil {
+				return err
+			}
+
+			issues = slices.DeleteFunc(issues, func(issue *github.IssueComment) bool {
+				return !strings.Contains(issue.GetBody(), contents)
+			})
+
+			if len(issues) == 0 {
+				return nil
+			}
+
+			mu.Lock()
+			result[prNumber] = issues[len(issues)-1]
+			mu.Unlock()
+
+			return nil
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 type Repo struct {
