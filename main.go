@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/cbrewster/jj-github/internal/github"
@@ -53,8 +54,6 @@ func main() {
 	slog.Info("pushing all commits")
 
 	for _, change := range changes {
-		branches = append(branches, change.GitPushBookmark)
-
 		changesByID[change.ID] = &change
 
 		if change.Description == "" {
@@ -68,6 +67,7 @@ func main() {
 		}
 
 		slog.Info("pushing", "change", change.ID, "commit", change.CommitID)
+		branches = append(branches, change.GitPushBookmark)
 		if err := jj.GitPush(change.ID); err != nil {
 			slog.Error("push change", "error", err)
 			os.Exit(1)
@@ -93,12 +93,23 @@ func main() {
 			continue
 		}
 
+		parent := changesByID[change.Parents[0].ChangeID]
+		base := parent.GitPushBookmark
+		if parent.Immutable {
+			base = parent.Bookmarks[0].Name
+		}
+
+		title, body, _ := strings.Cut(change.Description, "\n")
+
 		if _, ok := prs[change.GitPushBookmark]; !ok {
-			slog.Info(
-				"would create PR!",
-				"parent",
-				changesByID[change.Parents[0].ChangeID].GitPushBookmark,
-			)
+			slog.Info("would create PR!", "base", base)
+			gh.CreatePullRequest(ctx, repo, github.CreatePullRequestOptions{
+				Title:  title,
+				Body:   body,
+				Branch: change.GitPushBookmark,
+				Base:   base,
+				Draft:  strings.Contains(strings.ToLower(title), "wip"),
+			})
 		}
 	}
 }

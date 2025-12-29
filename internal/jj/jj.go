@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	logTemplate = `"{\"id\": \"" ++ change_id ++ "\", \"commit_id\": \"" ++ commit_id ++ "\", \"immutable\": " ++ immutable ++ ", \"description\": " ++ json(description) ++ ", \"git_push_bookmark\": \"" ++ %s ++ "\", \"parents\": " ++ json(parents) ++ "}"`
+	logTemplate = `"{\"id\": \"" ++ change_id ++ "\", \"commit_id\": \"" ++ commit_id ++ "\", \"immutable\": " ++ immutable ++ ", \"description\": " ++ json(description) ++ ", \"bookmarks\": " ++ json(bookmarks) ++ ", \"git_push_bookmark\": \"" ++ %s ++ "\", \"parents\": " ++ json(parents) ++ "}"`
 )
 
 type Change struct {
@@ -19,7 +19,10 @@ type Change struct {
 	Immutable       bool   `json:"immutable"`
 	GitPushBookmark string `json:"git_push_bookmark"`
 	Description     string `json:"description"`
-	Parents         []struct {
+	Bookmarks       []struct {
+		Name string `json:"name"`
+	} `json:"bookmarks"`
+	Parents []struct {
 		ChangeID string `json:"change_id"`
 		CommitID string `json:"commit_id"`
 	} `json:"parents"`
