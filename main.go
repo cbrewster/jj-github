@@ -9,6 +9,13 @@ import (
 )
 
 func main() {
+	remote, err := jj.GetRemote("origin")
+	if err != nil {
+		slog.Error("get remote", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("remote", "remote", remote)
+
 	changes, err := jj.GetChanges(os.Args[1:]...)
 	if err != nil {
 		slog.Error("get changes", "error", err)

@@ -67,3 +67,28 @@ func GetTemplate(name string) (string, error) {
 
 	return strings.TrimSpace(string(output)), nil
 }
+
+func GetRemote(name string) (string, error) {
+	output, err := exec.Command("jj", "git", "remote", "list").Output()
+	if err != nil {
+		return "", fmt.Errorf("jj git remote list: %w", err)
+	}
+
+	for line := range strings.Lines(string(output)) {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		remote, url, ok := strings.Cut(trimmed, " ")
+		if !ok {
+			return "", fmt.Errorf("unknown remote format %q", line)
+		}
+
+		if remote == name {
+			return url, nil
+		}
+	}
+
+	return "", fmt.Errorf("remote named %q not found", name)
+}
