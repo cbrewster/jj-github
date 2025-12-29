@@ -1,12 +1,84 @@
 package github
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
+	"slices"
 	"strings"
+	"sync"
+
+	"github.com/google/go-github/v80/github"
+	"golang.org/x/sync/errgroup"
 )
+
+const (
+	ghConcurrency = 8
+)
+
+type Client struct {
+	client *github.Client
+}
+
+func NewClient() (*Client, error) {
+	token, err := GetGHAuthToken()
+	if err != nil {
+		return nil, fmt.Errorf("get auth token from gh cli: %w", err)
+	}
+
+	return &Client{
+		client: github.NewClient(nil).WithAuthToken(token),
+	}, nil
+}
+
+// GetPullRequestsForBranches gets all the open pull requests for the specified branches.
+// This expects only a single pull request to be open per branch.
+func (c *Client) GetPullRequestsForBranches(
+	ctx context.Context,
+	repo Repo,
+	branches []string,
+) (map[string]*github.PullRequest, error) {
+	var mu sync.Mutex
+	result := make(map[string]*github.PullRequest)
+
+	eg, ctx := errgroup.WithContext(ctx)
+
+	for _, branch := range branches {
+		eg.Go(func() error {
+			prs, _, err := c.client.PullRequests.ListPullRequestsWithCommit(ctx, repo.Owner, repo.Name, branch, nil)
+			if err != nil {
+				return err
+			}
+
+			// Filter out closed PRs.
+			prs = slices.DeleteFunc(prs, func(pr *github.PullRequest) bool {
+				return pr.ClosedAt != nil
+			})
+
+			if len(prs) == 0 {
+				return nil
+			}
+
+			if len(prs) > 1 {
+				return fmt.Errorf("branch %q unexpectedly has %d open pull requests", branch, len(prs))
+			}
+
+			mu.Lock()
+			result[branch] = prs[0]
+			mu.Unlock()
+
+			return nil
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
 
 type Repo struct {
 	Owner string

@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	logTemplate = `"{\"id\": \"" ++ change_id ++ "\", \"commit_id\": \"" ++ commit_id ++ "\", \"immutable\": " ++ immutable ++ ", \"git_push_bookmark\": \"" ++ %s ++ "\", \"parents\": " ++ json(parents) ++ "}"`
+	logTemplate = `"{\"id\": \"" ++ change_id ++ "\", \"commit_id\": \"" ++ commit_id ++ "\", \"immutable\": " ++ immutable ++ ", \"description\": " ++ json(description) ++ ", \"git_push_bookmark\": \"" ++ %s ++ "\", \"parents\": " ++ json(parents) ++ "}"`
 )
 
 type Change struct {
@@ -18,6 +18,7 @@ type Change struct {
 	CommitID        string `json:"commit_id"`
 	Immutable       bool   `json:"immutable"`
 	GitPushBookmark string `json:"git_push_bookmark"`
+	Description     string `json:"description"`
 	Parents         []struct {
 		ChangeID string `json:"change_id"`
 		CommitID string `json:"commit_id"`
@@ -30,7 +31,12 @@ func GetChanges(revsets ...string) ([]Change, error) {
 		return nil, err
 	}
 
-	args := []string{"log", "--no-graph", "-T", fmt.Sprintf(logTemplate, gitPushBookmark)}
+	args := []string{
+		"log",
+		"--no-graph",
+		"--reversed",
+		"-T", fmt.Sprintf(logTemplate, gitPushBookmark),
+	}
 
 	for _, revset := range revsets {
 		args = append(args, "-r", revset)
@@ -91,4 +97,8 @@ func GetRemote(name string) (string, error) {
 	}
 
 	return "", fmt.Errorf("remote named %q not found", name)
+}
+
+func GitPush(changeID string) error {
+	return exec.Command("jj", "git", "push", "-c", fmt.Sprintf("change_id(%s)", changeID)).Run()
 }
