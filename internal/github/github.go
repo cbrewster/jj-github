@@ -80,6 +80,29 @@ func (c *Client) GetPullRequestsForBranches(
 	return result, nil
 }
 
+type CreatePullRequestOptions struct {
+	Title  string
+	Body   string
+	Branch string
+	Base   string
+	Draft  bool
+}
+
+func (c *Client) CreatePullRequest(
+	ctx context.Context,
+	repo Repo,
+	opts CreatePullRequestOptions,
+) error {
+	_, _, err := c.client.PullRequests.Create(ctx, repo.Owner, repo.Name, &github.NewPullRequest{
+		Title: &opts.Title,
+		Head:  &opts.Branch,
+		Base:  &opts.Base,
+		Body:  &opts.Body,
+		Draft: &opts.Draft,
+	})
+	return err
+}
+
 type Repo struct {
 	Owner string
 	Name  string
