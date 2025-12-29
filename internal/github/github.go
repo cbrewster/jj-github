@@ -2,7 +2,9 @@ package github
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
+	"os/exec"
 	"strings"
 )
 
@@ -75,4 +77,14 @@ func parseHttpsRemote(remote string) (Repo, error) {
 	}
 
 	return Repo{Owner: owner, Name: repo}, nil
+}
+
+// GetGHAuthToken returns a GitHub auth token using the gh cli.
+func GetGHAuthToken() (string, error) {
+	out, err := exec.Command("gh", "auth", "token").Output()
+	if err != nil {
+		return "", fmt.Errorf("gh auth token: %w", err)
+	}
+
+	return strings.TrimSpace(string(out)), nil
 }
