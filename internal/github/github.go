@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os/exec"
 	"slices"
@@ -52,6 +53,12 @@ func (c *Client) GetPullRequestsForBranches(
 		eg.Go(func() error {
 			prs, _, err := c.client.PullRequests.ListPullRequestsWithCommit(ctx, repo.Owner, repo.Name, branch, nil)
 			if err != nil {
+				var ghErr *github.ErrorResponse
+				// This error indicates that the branch has not been pushed yet.
+				if errors.As(err, &ghErr) &&
+					ghErr.Response.StatusCode == http.StatusUnprocessableEntity {
+					return nil
+				}
 				return err
 			}
 
