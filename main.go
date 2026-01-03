@@ -148,7 +148,7 @@ func main() {
 		prNumbers = append(prNumbers, pr.GetNumber())
 	}
 
-	stackComments, err := gh.GetCommentsForPullRequestsWithContents(
+	stackComments, err := gh.GetPRCommentsContaining(
 		ctx,
 		repo,
 		prNumbers,

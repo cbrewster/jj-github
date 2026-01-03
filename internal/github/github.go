@@ -18,10 +18,12 @@ const (
 	ghConcurrency = 8
 )
 
+// Client wraps the GitHub API client with authentication.
 type Client struct {
 	client *github.Client
 }
 
+// NewClient creates a new GitHub client authenticated via the gh CLI.
 func NewClient() (*Client, error) {
 	token, err := GetGHAuthToken()
 	if err != nil {
@@ -81,6 +83,7 @@ func (c *Client) GetPullRequestsForBranches(
 	return result, nil
 }
 
+// PullRequestOptions specifies options for creating or updating a pull request.
 type PullRequestOptions struct {
 	Title  string
 	Body   string
@@ -89,6 +92,7 @@ type PullRequestOptions struct {
 	Draft  bool
 }
 
+// CreatePullRequest creates a new pull request.
 func (c *Client) CreatePullRequest(
 	ctx context.Context,
 	repo Repo,
@@ -104,6 +108,7 @@ func (c *Client) CreatePullRequest(
 	return pr, err
 }
 
+// UpdatePullRequest updates an existing pull request.
 func (c *Client) UpdatePullRequest(
 	ctx context.Context,
 	repo Repo,
@@ -124,6 +129,7 @@ func (c *Client) UpdatePullRequest(
 	return err
 }
 
+// CreatePullRequestComment adds a comment to a pull request.
 func (c *Client) CreatePullRequestComment(
 	ctx context.Context,
 	repo Repo,
@@ -136,6 +142,7 @@ func (c *Client) CreatePullRequestComment(
 	return err
 }
 
+// UpdatePullRequestComment edits an existing pull request comment.
 func (c *Client) UpdatePullRequestComment(
 	ctx context.Context,
 	repo Repo,
@@ -148,7 +155,8 @@ func (c *Client) UpdatePullRequestComment(
 	return err
 }
 
-func (c *Client) GetCommentsForPullRequestsWithContents(
+// GetPRCommentsContaining returns comments containing the specified substring.
+func (c *Client) GetPRCommentsContaining(
 	ctx context.Context,
 	repo Repo,
 	pullRequests []int,
@@ -190,6 +198,7 @@ func (c *Client) GetCommentsForPullRequestsWithContents(
 	return result, nil
 }
 
+// Repo represents a GitHub repository.
 type Repo struct {
 	Owner string
 	Name  string
@@ -227,12 +236,12 @@ func parseSshRemote(remote string) (Repo, error) {
 
 	owner, repo, ok := strings.Cut(second, "/")
 	if !ok {
-		return Repo{}, errors.New("expected https remote to have / delimiter")
+		return Repo{}, errors.New("expected ssh remote to have / delimiter")
 	}
 
 	repo, ok = strings.CutSuffix(repo, ".git")
 	if !ok {
-		return Repo{}, errors.New("expected https remote to end with .git")
+		return Repo{}, errors.New("expected ssh remote to end with .git")
 	}
 
 	return Repo{Owner: owner, Name: repo}, nil
@@ -241,7 +250,7 @@ func parseSshRemote(remote string) (Repo, error) {
 func parseHttpsRemote(remote string) (Repo, error) {
 	parsedUrl, err := url.Parse(remote)
 	if err != nil {
-		return Repo{}, nil
+		return Repo{}, err
 	}
 
 	if parsedUrl.Host != "github.com" {
