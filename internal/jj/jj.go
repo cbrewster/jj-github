@@ -110,3 +110,8 @@ func GetRemote(name string) (string, error) {
 func GitPush(changeID string) error {
 	return exec.Command("jj", "git", "push", "-c", fmt.Sprintf("change_id(%s)", changeID)).Run()
 }
+
+// GitFetch fetches from the Git remote to get the latest state.
+func GitFetch() error {
+	return exec.Command("jj", "git", "fetch").Run()
+}
