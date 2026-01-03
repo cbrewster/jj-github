@@ -13,6 +13,7 @@ const (
 	logTemplate = `"{\"id\": \"" ++ change_id ++ "\", \"commit_id\": \"" ++ commit_id ++ "\", \"immutable\": " ++ immutable ++ ", \"description\": " ++ json(description) ++ ", \"bookmarks\": " ++ json(bookmarks) ++ ", \"git_push_bookmark\": \"" ++ %s ++ "\", \"parents\": " ++ json(parents) ++ "}"`
 )
 
+// Change represents a Jujutsu revision with its metadata.
 type Change struct {
 	ID              string `json:"id"`
 	CommitID        string `json:"commit_id"`
@@ -28,6 +29,7 @@ type Change struct {
 	} `json:"parents"`
 }
 
+// GetChanges returns changes matching the given revsets in topological order.
 func GetChanges(revsets ...string) ([]Change, error) {
 	gitPushBookmark, err := GetTemplate("git_push_bookmark")
 	if err != nil {
@@ -68,6 +70,7 @@ func GetChanges(revsets ...string) ([]Change, error) {
 	return changes, nil
 }
 
+// GetTemplate returns a Jujutsu template value from the user's config.
 func GetTemplate(name string) (string, error) {
 	output, err := exec.Command("jj", "config", "get", "templates."+name).Output()
 	if err != nil {
@@ -77,6 +80,7 @@ func GetTemplate(name string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
+// GetRemote returns the URL for the named Git remote.
 func GetRemote(name string) (string, error) {
 	output, err := exec.Command("jj", "git", "remote", "list").Output()
 	if err != nil {
@@ -102,6 +106,7 @@ func GetRemote(name string) (string, error) {
 	return "", fmt.Errorf("remote named %q not found", name)
 }
 
+// GitPush pushes the specified change to its Git branch.
 func GitPush(changeID string) error {
 	return exec.Command("jj", "git", "push", "-c", fmt.Sprintf("change_id(%s)", changeID)).Run()
 }
