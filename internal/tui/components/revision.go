@@ -25,6 +25,7 @@ type Revision struct {
 	PRNumber    int    // PR number if created/exists
 	Error       error  // Error if state is StateError
 	IsImmutable bool   // Is this an immutable revision (trunk)?
+	IsMergedPR  bool   // Is this a merged PR (no local change)?
 }
 
 // NewRevision creates a new revision from a jj.Change
@@ -54,11 +55,23 @@ func (r Revision) View(spinner Spinner, showConnector bool) string {
 	symbol := r.graphSymbol(spinner)
 
 	// Build the main line: symbol + change ID + description + PR number
-	if r.IsImmutable {
+	if r.IsImmutable && !r.IsMergedPR {
 		// Trunk/immutable revision
 		sb.WriteString(MutedStyle.Render(symbol))
 		sb.WriteString("  ")
 		sb.WriteString(MutedStyle.Render(r.Change.Description))
+	} else if r.IsMergedPR {
+		// Merged PR (no local change)
+		sb.WriteString(SuccessStyle.Render(GraphSuccess))
+		sb.WriteString("  ")
+		// Description (first line, truncated)
+		desc := r.firstLine(r.Change.Description)
+		if len(desc) > 40 {
+			desc = desc[:37] + "..."
+		}
+		sb.WriteString(MutedStyle.Render(desc))
+		sb.WriteString("  ")
+		sb.WriteString(MergedPRStyle.Render(fmt.Sprintf("#%d (merged)", r.PRNumber)))
 	} else {
 		sb.WriteString(symbol)
 		sb.WriteString("  ")

@@ -90,6 +90,27 @@ func (c *Client) GetPullRequestsForBranches(
 	return result, nil
 }
 
+// GetPullRequest fetches a single pull request by number.
+// Returns nil if the PR doesn't exist (404).
+func (c *Client) GetPullRequest(
+	ctx context.Context,
+	repo Repo,
+	number int,
+) (*github.PullRequest, error) {
+	pr, resp, err := c.client.PullRequests.Get(ctx, repo.Owner, repo.Name, number)
+	if err != nil {
+		var ghErr *github.ErrorResponse
+		if errors.As(err, &ghErr) && ghErr.Response.StatusCode == http.StatusNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	return pr, nil
+}
+
 // PullRequestOptions specifies options for creating or updating a pull request.
 type PullRequestOptions struct {
 	Title  string

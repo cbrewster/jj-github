@@ -4,14 +4,17 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/cbrewster/jj-github/internal/github"
 	"github.com/cbrewster/jj-github/internal/jj"
+	"github.com/cbrewster/jj-github/internal/state"
 	"github.com/cbrewster/jj-github/internal/tui/components"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	gogithub "github.com/google/go-github/v80/github"
+	"golang.org/x/sync/errgroup"
 )
 
 // Phase represents the current phase of the sync workflow
@@ -33,6 +36,8 @@ type (
 		Changes     []jj.Change
 		TrunkName   string
 		ExistingPRs map[string]*gogithub.PullRequest
+		State       *state.State
+		MergedPRs   []components.MergedPR
 		NeedsSync   bool
 		Err         error
 	}
@@ -40,8 +45,15 @@ type (
 	RevisionSyncedMsg struct {
 		ChangeID string
 		PRNumber int
+		Title    string
+		Branch   string
 		Created  bool
 		Err      error
+	}
+
+	AllRevisionsSyncedMsg struct {
+		Results []RevisionSyncedMsg
+		Err     error
 	}
 
 	AllCommentsUpdatedMsg struct {
@@ -73,6 +85,10 @@ type Model struct {
 	changes       []jj.Change
 	existingPRs   map[string]*gogithub.PullRequest
 	stackComments map[int]*gogithub.IssueComment
+
+	// Persisted state for tracking PRs
+	prState   *state.State
+	mergedPRs []components.MergedPR
 }
 
 // NewModel creates a new TUI model
@@ -112,8 +128,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Matches(msg, m.keys.Submit) && m.phase == PhaseConfirmation:
 			m.phase = PhaseSyncing
-			m.currentIndex = 0
-			return m, m.syncNextRevisionCmd()
+			// Mark all mutable revisions as in progress
+			for _, rev := range m.stack.MutableRevisions() {
+				m.stack.SetRevisionState(rev.Change.ID, components.StateInProgress, "Syncing...")
+			}
+			return m, m.syncAllRevisionsCmd()
 		}
 
 	case RevisionsLoadedMsg:
@@ -125,7 +144,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.changes = msg.Changes
 		m.existingPRs = msg.ExistingPRs
-		m.stack = components.NewStack(msg.Changes, msg.TrunkName)
+		m.prState = msg.State
+		m.mergedPRs = msg.MergedPRs
+		m.stack = components.NewStack(msg.Changes, msg.TrunkName, msg.MergedPRs)
 		m.totalCount = len(m.stack.MutableRevisions())
 
 		// Set PR numbers for existing PRs on the stack
@@ -151,21 +172,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = PhaseConfirmation
 		return m, nil
 
-	case RevisionSyncedMsg:
+	case AllRevisionsSyncedMsg:
 		if msg.Err != nil {
-			m.stack.SetRevisionError(msg.ChangeID, msg.Err)
 			m.phase = PhaseError
 			m.err = msg.Err
-			return m, nil
+			return m, tea.Quit
 		}
 
-		m.stack.SetRevisionPR(msg.ChangeID, msg.PRNumber)
-		m.stack.SetRevisionState(msg.ChangeID, components.StateSuccess, "")
-		m.currentIndex++
+		// Process all results
+		for _, result := range msg.Results {
+			if result.Err != nil {
+				m.stack.SetRevisionError(result.ChangeID, result.Err)
+				m.phase = PhaseError
+				m.err = result.Err
+				return m, tea.Quit
+			}
 
-		mutableRevs := m.stack.MutableRevisions()
-		if m.currentIndex < len(mutableRevs) {
-			return m, m.syncNextRevisionCmd()
+			m.stack.SetRevisionPR(result.ChangeID, result.PRNumber)
+			m.stack.SetRevisionState(result.ChangeID, components.StateSuccess, "")
+
+			// Update persisted state with the synced PR
+			if m.prState != nil {
+				m.prState.Set(result.ChangeID, state.StackEntry{
+					PRNumber: result.PRNumber,
+					Branch:   result.Branch,
+					State:    state.PRStateOpen,
+					Title:    result.Title,
+				})
+			}
+
+			// Update existingPRs map for comment generation
+			if m.existingPRs[result.Branch] == nil {
+				m.existingPRs[result.Branch] = &gogithub.PullRequest{
+					Number: &result.PRNumber,
+				}
+			}
 		}
 
 		// Move to comments phase
@@ -176,7 +217,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.phase = PhaseError
 			m.err = msg.Err
-			return m, nil
+			return m, tea.Quit
 		}
 
 		m.phase = PhaseComplete
@@ -256,6 +297,12 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 			return RevisionsLoadedMsg{Err: err}
 		}
 
+		// Load persisted state
+		prState, err := state.Load()
+		if err != nil {
+			return RevisionsLoadedMsg{Err: fmt.Errorf("load state: %w", err)}
+		}
+
 		// Determine trunk name
 		trunkName := "main"
 		if len(changes) > 0 && changes[0].Immutable {
@@ -267,10 +314,12 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 		// Collect branches for mutable changes
 		var branches []string
 		var mutableChanges []jj.Change
-		for _, change := range changes {
-			if !change.Immutable && change.Description != "" {
-				branches = append(branches, change.GitPushBookmark)
-				mutableChanges = append(mutableChanges, change)
+		changesByID := make(map[string]*jj.Change)
+		for i := range changes {
+			changesByID[changes[i].ID] = &changes[i]
+			if !changes[i].Immutable && changes[i].Description != "" {
+				branches = append(branches, changes[i].GitPushBookmark)
+				mutableChanges = append(mutableChanges, changes[i])
 			}
 		}
 
@@ -278,29 +327,104 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 			return RevisionsLoadedMsg{
 				Changes:   changes,
 				TrunkName: trunkName,
+				State:     prState,
 				NeedsSync: false,
 			}
 		}
 
-		// Fetch existing PRs
+		// Fetch existing PRs by branch matching
 		existingPRs, err := m.gh.GetPullRequestsForBranches(m.ctx, m.repo, branches)
 		if err != nil {
 			return RevisionsLoadedMsg{Err: err}
 		}
 
-		// Check if sync is needed
-		needsSync := false
-		changesByID := make(map[string]*jj.Change)
-		for i := range changes {
-			changesByID[changes[i].ID] = &changes[i]
+		// Update state: add any PRs found by branch matching that aren't in state
+		for _, change := range mutableChanges {
+			if pr, ok := existingPRs[change.GitPushBookmark]; ok {
+				title, _, _ := strings.Cut(change.Description, "\n")
+				prState.Set(change.ID, state.StackEntry{
+					PRNumber: pr.GetNumber(),
+					Branch:   change.GitPushBookmark,
+					State:    state.PRStateOpen,
+					Title:    title,
+				})
+			}
 		}
 
+		// Update PR states from GitHub and build merged PRs list
+		var mergedPRs []components.MergedPR
+		var entriesToRemove []string
+
+		for changeID, entry := range prState.Entries {
+			// Skip entries for changes that are still in the local stack
+			if _, inStack := changesByID[changeID]; inStack {
+				continue
+			}
+
+			// Fetch PR state from GitHub
+			pr, err := m.gh.GetPullRequest(m.ctx, m.repo, entry.PRNumber)
+			if err != nil {
+				return RevisionsLoadedMsg{Err: fmt.Errorf("get PR #%d: %w", entry.PRNumber, err)}
+			}
+
+			if pr == nil {
+				// PR was deleted
+				entriesToRemove = append(entriesToRemove, changeID)
+				continue
+			}
+
+			// Update state based on PR status
+			if !pr.GetMergedAt().IsZero() {
+				// PR is merged - add to merged PRs list for display
+				entry.State = state.PRStateMerged
+				prState.Set(changeID, entry)
+				mergedPRs = append(mergedPRs, components.MergedPR{
+					ChangeID: changeID,
+					PRNumber: entry.PRNumber,
+					Title:    entry.Title,
+				})
+			} else if pr.GetState() == "closed" {
+				// PR is closed but not merged - remove from state
+				entriesToRemove = append(entriesToRemove, changeID)
+			}
+			// If still open, keep in state as-is
+		}
+
+		// Remove closed/deleted PRs from state
+		for _, changeID := range entriesToRemove {
+			prState.Remove(changeID)
+		}
+
+		// Check if sync is needed
+		needsSync := false
 		for _, change := range mutableChanges {
-			parent := changesByID[change.Parents[0].ChangeID]
-			base := parent.GitPushBookmark
-			if parent.Immutable {
-				if len(parent.Bookmarks) > 0 {
-					base = parent.Bookmarks[0].Name
+			// Determine the base branch for this change
+			base := trunkName
+			if len(change.Parents) > 0 {
+				parentID := change.Parents[0].ChangeID
+				for parentID != "" {
+					parent := changesByID[parentID]
+					if parent == nil {
+						// Parent not in current stack (possibly merged), use trunk
+						break
+					}
+					if parent.Immutable {
+						if len(parent.Bookmarks) > 0 {
+							base = parent.Bookmarks[0].Name
+						}
+						break
+					}
+					// Check if parent has an open PR
+					if _, hasOpenPR := existingPRs[parent.GitPushBookmark]; hasOpenPR {
+						base = parent.GitPushBookmark
+						break
+					}
+					// Try grandparent
+					if len(parent.Parents) > 0 {
+						parentID = parent.Parents[0].ChangeID
+					} else {
+						break
+					}
 				}
 			}
 
@@ -333,93 +457,138 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 			Changes:     changes,
 			TrunkName:   trunkName,
 			ExistingPRs: existingPRs,
+			State:       prState,
+			MergedPRs:   mergedPRs,
 			NeedsSync:   needsSync,
 		}
 	}
 }
 
-func (m Model) syncNextRevisionCmd() tea.Cmd {
-	mutableRevs := m.stack.MutableRevisions()
-	// Revisions are in reverse order (current at top), so we process from the end
-	idx := len(mutableRevs) - 1 - m.currentIndex
-	if idx < 0 {
-		return nil
-	}
-	rev := mutableRevs[idx]
-	m.stack.SetRevisionState(rev.Change.ID, components.StateInProgress, "Pushing & syncing PR...")
-
+func (m Model) syncAllRevisionsCmd() tea.Cmd {
 	return func() tea.Msg {
-		change := rev.Change
-
-		// Step 1: Push the branch
-		if err := jj.GitPush(change.ID); err != nil {
-			return RevisionSyncedMsg{ChangeID: change.ID, Err: fmt.Errorf("push: %w", err)}
+		mutableRevs := m.stack.MutableRevisions()
+		if len(mutableRevs) == 0 {
+			return AllRevisionsSyncedMsg{}
 		}
 
-		// Step 2: Create or update the PR
+		// Build helper maps
 		changesByID := make(map[string]*jj.Change)
 		for i := range m.changes {
 			changesByID[m.changes[i].ID] = &m.changes[i]
 		}
 
-		parent := changesByID[change.Parents[0].ChangeID]
-		base := parent.GitPushBookmark
-		if parent.Immutable {
-			if len(parent.Bookmarks) > 0 {
-				base = parent.Bookmarks[0].Name
+		// Phase 1: Push all branches sequentially (jj operations must be sequential)
+		// Process from base to tip (reverse of display order)
+		for i := len(mutableRevs) - 1; i >= 0; i-- {
+			change := mutableRevs[i].Change
+			if err := jj.GitPush(change.ID); err != nil {
+				return AllRevisionsSyncedMsg{Err: fmt.Errorf("push %s: %w", change.ID[:8], err)}
 			}
 		}
 
-		title, body, _ := strings.Cut(change.Description, "\n")
-		isDraft := strings.Contains(strings.ToLower(title), "wip")
+		// Phase 2: Create/update all PRs concurrently (GitHub API calls are safe to parallelize)
+		var mu sync.Mutex
+		results := make([]RevisionSyncedMsg, 0, len(mutableRevs))
+		createdPRs := make(map[string]*gogithub.PullRequest)
 
-		if pr, ok := m.existingPRs[change.GitPushBookmark]; ok {
-			// Check if update needed
-			if pr.GetTitle() == title &&
-				pr.GetBody() == body &&
-				pr.GetHead().GetRef() == change.GitPushBookmark &&
-				pr.GetBase().GetRef() == base &&
-				pr.GetDraft() == isDraft {
-				return RevisionSyncedMsg{
-					ChangeID: change.ID,
-					PRNumber: pr.GetNumber(),
-					Created:  false,
+		eg, ctx := errgroup.WithContext(m.ctx)
+		eg.SetLimit(8)
+
+		for _, rev := range mutableRevs {
+			change := rev.Change
+			eg.Go(func() error {
+				// Determine the base branch for this PR
+				base := m.stack.TrunkName
+				if len(change.Parents) > 0 {
+					parentID := change.Parents[0].ChangeID
+					for parentID != "" {
+						parent := changesByID[parentID]
+						if parent == nil {
+							// Parent not in current stack, check if it's a merged PR
+							if m.prState != nil {
+								if entry := m.prState.GetByChangeID(parentID); entry != nil && entry.State == state.PRStateMerged {
+									break
+								}
+							}
+							break
+						}
+						if parent.Immutable {
+							if len(parent.Bookmarks) > 0 {
+								base = parent.Bookmarks[0].Name
+							}
+							break
+						}
+						// Check if parent has an open PR (valid branch)
+						if _, hasOpenPR := m.existingPRs[parent.GitPushBookmark]; hasOpenPR {
+							base = parent.GitPushBookmark
+							break
+						}
+						// Try grandparent
+						if len(parent.Parents) > 0 {
+							parentID = parent.Parents[0].ChangeID
+						} else {
+							break
+						}
+					}
 				}
-			}
 
-			err := m.gh.UpdatePullRequest(m.ctx, m.repo, *pr.Number, github.PullRequestOptions{
-				Title:  title,
-				Body:   body,
-				Branch: change.GitPushBookmark,
-				Base:   base,
-				Draft:  isDraft,
+				title, body, _ := strings.Cut(change.Description, "\n")
+				isDraft := strings.Contains(strings.ToLower(title), "wip")
+
+				var result RevisionSyncedMsg
+				result.ChangeID = change.ID
+				result.Title = title
+				result.Branch = change.GitPushBookmark
+
+				if pr, ok := m.existingPRs[change.GitPushBookmark]; ok {
+					// Update existing PR
+					err := m.gh.UpdatePullRequest(ctx, m.repo, pr.GetNumber(), github.PullRequestOptions{
+						Title:  title,
+						Body:   body,
+						Branch: change.GitPushBookmark,
+						Base:   base,
+						Draft:  isDraft,
+					})
+					result.PRNumber = pr.GetNumber()
+					result.Created = false
+					result.Err = err
+				} else {
+					// Create new PR
+					pr, err := m.gh.CreatePullRequest(ctx, m.repo, github.PullRequestOptions{
+						Title:  title,
+						Body:   body,
+						Branch: change.GitPushBookmark,
+						Base:   base,
+						Draft:  isDraft,
+					})
+					if err != nil {
+						result.Err = err
+					} else {
+						result.PRNumber = pr.GetNumber()
+						result.Created = true
+						mu.Lock()
+						createdPRs[change.GitPushBookmark] = pr
+						mu.Unlock()
+					}
+				}
+
+				mu.Lock()
+				results = append(results, result)
+				mu.Unlock()
+				return nil
 			})
-			return RevisionSyncedMsg{
-				ChangeID: change.ID,
-				PRNumber: pr.GetNumber(),
-				Created:  false,
-				Err:      err,
-			}
 		}
 
-		// Create new PR
-		pr, err := m.gh.CreatePullRequest(m.ctx, m.repo, github.PullRequestOptions{
-			Title:  title,
-			Body:   body,
-			Branch: change.GitPushBookmark,
-			Base:   base,
-			Draft:  isDraft,
-		})
-		if err != nil {
-			return RevisionSyncedMsg{ChangeID: change.ID, Err: err}
+		if err := eg.Wait(); err != nil {
+			return AllRevisionsSyncedMsg{Err: err}
 		}
-		// Store for later use
-		m.existingPRs[change.GitPushBookmark] = pr
-		return RevisionSyncedMsg{
-			ChangeID: change.ID,
-			PRNumber: pr.GetNumber(),
-			Created:  true,
+
+		// Store created PRs for comment generation
+		for branch, pr := range createdPRs {
+			m.existingPRs[branch] = pr
 		}
+
+		return AllRevisionsSyncedMsg{Results: results}
 	}
 }
 
@@ -443,7 +612,7 @@ func (m Model) updateAllCommentsCmd() tea.Cmd {
 
 		// Update comments for each PR
 		for _, rev := range m.stack.Revisions {
-			if rev.IsImmutable {
+			if rev.IsImmutable || rev.IsMergedPR {
 				continue
 			}
 
@@ -462,6 +631,13 @@ func (m Model) updateAllCommentsCmd() tea.Cmd {
 				if r.IsImmutable {
 					continue
 				}
+
+				if r.IsMergedPR {
+					// Merged PR
+					fmt.Fprintf(builder, "- #%d (merged)\n", r.PRNumber)
+					continue
+				}
+
 				prForRev, ok := m.existingPRs[r.Change.GitPushBookmark]
 				if !ok {
 					continue
@@ -504,6 +680,13 @@ func (m Model) updateAllCommentsCmd() tea.Cmd {
 				commentBody,
 			); err != nil {
 				return AllCommentsUpdatedMsg{Err: err}
+			}
+		}
+
+		// Save the state to disk
+		if m.prState != nil {
+			if err := m.prState.Save(); err != nil {
+				return AllCommentsUpdatedMsg{Err: fmt.Errorf("save state: %w", err)}
 			}
 		}
 
