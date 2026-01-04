@@ -16,7 +16,7 @@ jj-github automates the workflow of creating and updating GitHub pull requests f
 Add an alias to your Jujutsu config:
 
 ```bash
-jj config set --user aliases.github '["util", "exec", "jj-github"]'
+jj config set --user aliases.github '["util", "exec", "--", "jj-github"]'
 ```
 
 ## Usage
