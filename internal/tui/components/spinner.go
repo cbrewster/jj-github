@@ -14,7 +14,7 @@ type Spinner struct {
 // NewSpinner creates a new spinner with the dot style
 func NewSpinner() Spinner {
 	s := spinner.New()
-	s.Spinner = spinner.Dot
+	s.Spinner = spinner.MiniDot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#eab308", Dark: "#facc15"})
 	return Spinner{spinner: s}
 }

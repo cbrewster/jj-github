@@ -84,6 +84,7 @@ func (s *Stack) MutableRevisions() []Revision {
 // View renders the full stack
 func (s Stack) View(spinner Spinner) string {
 	var sb strings.Builder
+	sb.WriteString("\nRevisions:\n\n")
 
 	for i, rev := range s.Revisions {
 		// Show connector unless this is the last revision (trunk)

@@ -19,21 +19,21 @@ const (
 
 // Revision represents a single revision in the stack with its sync state
 type Revision struct {
-	Change     jj.Change
-	State      RevisionState
-	StatusMsg  string // Sub-status message (e.g., "Pushing...", "Creating PR...")
-	PRNumber   int    // PR number if created/exists
-	Error      error  // Error if state is StateError
-	IsCurrent  bool   // Is this the current working copy (@)?
-	IsImmutable bool  // Is this an immutable revision (trunk)?
+	Change      jj.Change
+	State       RevisionState
+	StatusMsg   string // Sub-status message (e.g., "Pushing...", "Creating PR...")
+	PRNumber    int    // PR number if created/exists
+	Error       error  // Error if state is StateError
+	IsCurrent   bool   // Is this the current working copy (@)?
+	IsImmutable bool   // Is this an immutable revision (trunk)?
 }
 
 // NewRevision creates a new revision from a jj.Change
 func NewRevision(change jj.Change, isCurrent bool) Revision {
 	return Revision{
-		Change:     change,
-		State:      StatePending,
-		IsCurrent:  isCurrent,
+		Change:      change,
+		State:       StatePending,
+		IsCurrent:   isCurrent,
 		IsImmutable: change.Immutable,
 	}
 }
@@ -94,23 +94,22 @@ func (r Revision) View(spinner Spinner, showConnector bool) string {
 
 	sb.WriteString("\n")
 
+	// Connector line to next revision (if not the last one)
+	if showConnector {
+		sb.WriteString(GraphLine)
+	}
+
 	// Status message line (if in progress or error)
 	if r.StatusMsg != "" && (r.State == StateInProgress || r.State == StateError) {
-		sb.WriteString(GraphLine)
 		sb.WriteString("  ")
 		if r.State == StateError {
 			sb.WriteString(ErrorStyle.Render(r.StatusMsg))
 		} else {
 			sb.WriteString(MutedStyle.Render(r.StatusMsg))
 		}
-		sb.WriteString("\n")
 	}
 
-	// Connector line to next revision (if not the last one)
-	if showConnector {
-		sb.WriteString(GraphLine)
-		sb.WriteString("\n")
-	}
+	sb.WriteString("\n")
 
 	return sb.String()
 }

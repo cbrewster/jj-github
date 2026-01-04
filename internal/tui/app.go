@@ -120,7 +120,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.phase = PhaseError
 			m.err = msg.Err
-			return m, nil
+			return m, tea.Quit
 		}
 
 		m.changes = msg.Changes
@@ -198,15 +198,15 @@ func (m Model) View() string {
 	switch m.phase {
 	case PhaseLoading:
 		sb.WriteString(m.spinner.View())
-		sb.WriteString(" Loading...\n")
+		sb.WriteString(" Fetching remote state...\n")
 
 	case PhaseUpToDate:
-		sb.WriteString(components.SuccessStyle.Render("All PRs are up to date!"))
-		sb.WriteString("\n\n")
 		sb.WriteString(m.stack.View(m.spinner))
+		sb.WriteString("\n")
+		sb.WriteString(components.SuccessStyle.Render("All PRs are up to date!"))
+		sb.WriteString("\n")
 
 	case PhaseConfirmation:
-		sb.WriteString("Revisions to sync:\n\n")
 		sb.WriteString(m.stack.View(m.spinner))
 		sb.WriteString("\n")
 		count := len(m.stack.MutableRevisions())
@@ -215,33 +215,27 @@ func (m Model) View() string {
 		sb.WriteString("\n")
 
 	case PhaseSyncing:
-		sb.WriteString("Syncing revisions...\n\n")
 		sb.WriteString(m.stack.View(m.spinner))
+		sb.WriteString("Syncing revisions...\n\n")
 
 	case PhaseUpdatingComments:
+		sb.WriteString(m.stack.View(m.spinner))
 		sb.WriteString(m.spinner.View())
 		sb.WriteString(" Updating stack comments...\n\n")
-		sb.WriteString(m.stack.View(m.spinner))
 
 	case PhaseComplete:
-		sb.WriteString(components.SuccessStyle.Render("Sync complete!"))
-		sb.WriteString("\n\n")
 		sb.WriteString(m.stack.View(m.spinner))
-		sb.WriteString("\n")
 		count := len(m.stack.MutableRevisions())
 		fmt.Fprintf(&sb, "%d pull request(s) synced successfully.\n", count)
 
 	case PhaseError:
+		sb.WriteString(m.stack.View(m.spinner))
 		sb.WriteString(components.ErrorStyle.Render("Sync failed"))
 		sb.WriteString("\n\n")
 		if m.err != nil {
 			sb.WriteString(components.ErrorStyle.Render(m.err.Error()))
-			sb.WriteString("\n\n")
+			sb.WriteString("\n")
 		}
-		sb.WriteString(m.stack.View(m.spinner))
-		sb.WriteString("\n")
-		sb.WriteString(m.help.View(m.keys))
-		sb.WriteString("\n")
 	}
 
 	return sb.String()
