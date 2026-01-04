@@ -81,9 +81,11 @@ func (r Revision) View(spinner Spinner, showConnector bool) string {
 		sb.WriteString(desc)
 
 		// PR number if exists
+		sb.WriteString("  ")
 		if r.PRNumber > 0 {
-			sb.WriteString("  ")
 			sb.WriteString(PRNumberStyle.Render(fmt.Sprintf("#%d", r.PRNumber)))
+		} else {
+			sb.WriteString(PRNumberStyle.Render("(new PR)"))
 		}
 
 		// Current marker
