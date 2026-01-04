@@ -12,19 +12,11 @@ type Stack struct {
 	TrunkName string
 }
 
-// MergedPR represents a merged PR to display in the stack.
-type MergedPR struct {
-	ChangeID string
-	PRNumber int
-	Title    string
-}
-
 // NewStack creates a new stack from a list of changes
 // Changes should be in topological order (trunk first, current last)
 // The stack will display in reverse order (current at top, trunk at bottom)
-// mergedPRs contains PRs that have been merged but should still be shown
-func NewStack(changes []jj.Change, trunkName string, mergedPRs []MergedPR) Stack {
-	revisions := make([]Revision, 0, len(changes)+len(mergedPRs)+1)
+func NewStack(changes []jj.Change, trunkName string) Stack {
+	revisions := make([]Revision, 0, len(changes)+1)
 
 	// Add changes in reverse order (current at top)
 	for i := len(changes) - 1; i >= 0; i-- {
@@ -33,17 +25,6 @@ func NewStack(changes []jj.Change, trunkName string, mergedPRs []MergedPR) Stack
 			continue // Skip immutable changes, we'll add trunk at the end
 		}
 		revisions = append(revisions, NewRevision(change))
-	}
-
-	// Add merged PRs (shown after current changes, before trunk)
-	for _, merged := range mergedPRs {
-		revisions = append(revisions, Revision{
-			Change: jj.Change{
-				Description: merged.Title,
-			},
-			PRNumber:   merged.PRNumber,
-			IsMergedPR: true,
-		})
 	}
 
 	// Add trunk at the bottom
@@ -88,11 +69,11 @@ func (s *Stack) SetRevisionError(changeID string, err error) {
 	}
 }
 
-// MutableRevisions returns only the mutable (non-trunk, non-merged) revisions
+// MutableRevisions returns only the mutable (non-trunk) revisions
 func (s *Stack) MutableRevisions() []Revision {
 	var result []Revision
 	for _, r := range s.Revisions {
-		if !r.IsImmutable && !r.IsMergedPR {
+		if !r.IsImmutable {
 			result = append(result, r)
 		}
 	}

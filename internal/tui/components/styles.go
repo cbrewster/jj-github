@@ -69,9 +69,4 @@ var (
 	StatusMsgStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted).
 			PaddingLeft(3)
-
-	// Merged PR style (for PRs that have been merged)
-	MergedPRStyle = lipgloss.NewStyle().
-			Foreground(ColorSuccess).
-			Italic(true)
 )
