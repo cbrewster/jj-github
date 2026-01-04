@@ -69,7 +69,8 @@ func (r Revision) View(spinner Spinner, showConnector bool) string {
 		if len(changeID) > 8 {
 			changeID = changeID[:8]
 		}
-		sb.WriteString(ChangeIDStyle.Render(changeID))
+		sb.WriteString(ChangeIDShortStyle.Render(r.Change.ShortID))
+		sb.WriteString(ChangeIDRestStyle.Render(changeID[len(r.Change.ShortID):]))
 		sb.WriteString("  ")
 
 		// Description (first line, truncated)

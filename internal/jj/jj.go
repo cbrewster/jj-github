@@ -10,12 +10,13 @@ import (
 )
 
 const (
-	logTemplate = `"{\"id\": \"" ++ change_id ++ "\", \"commit_id\": \"" ++ commit_id ++ "\", \"immutable\": " ++ immutable ++ ", \"description\": " ++ json(description) ++ ", \"bookmarks\": " ++ json(bookmarks) ++ ", \"git_push_bookmark\": \"" ++ %s ++ "\", \"parents\": " ++ json(parents) ++ "}"`
+	logTemplate = `"{\"id\": \"" ++ change_id ++ "\", \"short_id\": \"" ++ change_id.shortest() ++ "\", \"commit_id\": \"" ++ commit_id ++ "\", \"immutable\": " ++ immutable ++ ", \"description\": " ++ json(description) ++ ", \"bookmarks\": " ++ json(bookmarks) ++ ", \"git_push_bookmark\": \"" ++ %s ++ "\", \"parents\": " ++ json(parents) ++ "}"`
 )
 
 // Change represents a Jujutsu revision with its metadata.
 type Change struct {
 	ID              string `json:"id"`
+	ShortID         string `json:"short_id"`
 	CommitID        string `json:"commit_id"`
 	Immutable       bool   `json:"immutable"`
 	GitPushBookmark string `json:"git_push_bookmark"`

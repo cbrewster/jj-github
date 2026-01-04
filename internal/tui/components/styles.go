@@ -15,11 +15,11 @@ const (
 
 // Colors
 var (
-	ColorMuted   = lipgloss.AdaptiveColor{Light: "#888888", Dark: "#666666"}
-	ColorSuccess = lipgloss.AdaptiveColor{Light: "#22c55e", Dark: "#4ade80"}
-	ColorError   = lipgloss.AdaptiveColor{Light: "#ef4444", Dark: "#f87171"}
-	ColorAccent  = lipgloss.AdaptiveColor{Light: "#3b82f6", Dark: "#60a5fa"}
-	ColorYellow  = lipgloss.AdaptiveColor{Light: "#eab308", Dark: "#facc15"}
+	ColorMuted   = lipgloss.Color("8")
+	ColorSuccess = lipgloss.Color("2")
+	ColorError   = lipgloss.Color("1")
+	ColorAccent  = lipgloss.Color("5")
+	ColorYellow  = lipgloss.Color("3")
 )
 
 // Styles
@@ -52,9 +52,14 @@ var (
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted)
 
-	// Change ID style
-	ChangeIDStyle = lipgloss.NewStyle().
-			Foreground(ColorAccent)
+	// Change ID Short style
+	ChangeIDShortStyle = lipgloss.NewStyle().
+				Foreground(ColorAccent).
+				Bold(true)
+
+	// Change ID Rest style
+	ChangeIDRestStyle = lipgloss.NewStyle().
+				Foreground(ColorMuted)
 
 	// PR number style
 	PRNumberStyle = lipgloss.NewStyle().
