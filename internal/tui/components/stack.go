@@ -15,7 +15,7 @@ type Stack struct {
 // NewStack creates a new stack from a list of changes
 // Changes should be in topological order (trunk first, current last)
 // The stack will display in reverse order (current at top, trunk at bottom)
-func NewStack(changes []jj.Change, trunkName string, currentChangeID string) Stack {
+func NewStack(changes []jj.Change, trunkName string) Stack {
 	revisions := make([]Revision, 0, len(changes)+1)
 
 	// Add changes in reverse order (current at top)
@@ -24,8 +24,7 @@ func NewStack(changes []jj.Change, trunkName string, currentChangeID string) Sta
 		if change.Immutable {
 			continue // Skip immutable changes, we'll add trunk at the end
 		}
-		isCurrent := change.ID == currentChangeID
-		revisions = append(revisions, NewRevision(change, isCurrent))
+		revisions = append(revisions, NewRevision(change))
 	}
 
 	// Add trunk at the bottom
