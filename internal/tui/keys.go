@@ -7,7 +7,6 @@ import "github.com/charmbracelet/bubbles/key"
 type KeyMap struct {
 	Submit key.Binding
 	Quit   key.Binding
-	Retry  key.Binding
 }
 
 // ShortHelp returns key bindings for the short help view
@@ -33,10 +32,6 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("q", "ctrl+c"),
 			key.WithHelp("q", "quit"),
 		),
-		Retry: key.NewBinding(
-			key.WithKeys("r"),
-			key.WithHelp("r", "retry"),
-		),
 	}
 }
 
@@ -51,10 +46,6 @@ func ErrorKeyMap() KeyMap {
 		Quit: key.NewBinding(
 			key.WithKeys("q", "ctrl+c"),
 			key.WithHelp("q", "quit"),
-		),
-		Retry: key.NewBinding(
-			key.WithKeys("r"),
-			key.WithHelp("r", "retry"),
 		),
 	}
 }

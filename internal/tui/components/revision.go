@@ -24,16 +24,14 @@ type Revision struct {
 	StatusMsg   string // Sub-status message (e.g., "Pushing...", "Creating PR...")
 	PRNumber    int    // PR number if created/exists
 	Error       error  // Error if state is StateError
-	IsCurrent   bool   // Is this the current working copy (@)?
 	IsImmutable bool   // Is this an immutable revision (trunk)?
 }
 
 // NewRevision creates a new revision from a jj.Change
-func NewRevision(change jj.Change, isCurrent bool) Revision {
+func NewRevision(change jj.Change) Revision {
 	return Revision{
 		Change:      change,
 		State:       StatePending,
-		IsCurrent:   isCurrent,
 		IsImmutable: change.Immutable,
 	}
 }
@@ -87,12 +85,6 @@ func (r Revision) View(spinner Spinner, showConnector bool) string {
 		} else {
 			sb.WriteString(PRNumberStyle.Render("(new PR)"))
 		}
-
-		// Current marker
-		if r.IsCurrent && r.State == StateSuccess {
-			sb.WriteString("  ")
-			sb.WriteString(MutedStyle.Render("← @"))
-		}
 	}
 
 	sb.WriteString("\n")
@@ -127,8 +119,6 @@ func (r Revision) graphSymbol(spinner Spinner) string {
 		return SuccessStyle.Render(GraphSuccess)
 	case r.State == StateInProgress:
 		return spinner.View()
-	case r.IsCurrent:
-		return GraphCurrent
 	default:
 		return GraphPending
 	}

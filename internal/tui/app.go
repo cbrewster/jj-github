@@ -125,7 +125,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.changes = msg.Changes
 		m.existingPRs = msg.ExistingPRs
-		m.stack = components.NewStack(msg.Changes, msg.TrunkName, "")
+		m.stack = components.NewStack(msg.Changes, msg.TrunkName)
 		m.totalCount = len(m.stack.MutableRevisions())
 
 		// Set PR numbers for existing PRs on the stack
