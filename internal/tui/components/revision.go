@@ -25,6 +25,7 @@ type Revision struct {
 	PRNumber    int    // PR number if created/exists
 	Error       error  // Error if state is StateError
 	IsImmutable bool   // Is this an immutable revision (trunk)?
+	NeedsSync   bool   // Whether this revision needs to be synced
 }
 
 // NewRevision creates a new revision from a jj.Change
@@ -119,6 +120,9 @@ func (r Revision) graphSymbol(spinner Spinner) string {
 		return SuccessStyle.Render(GraphSuccess)
 	case r.State == StateInProgress:
 		return spinner.View()
+	case r.State == StatePending && !r.NeedsSync:
+		// Already up to date, show success indicator
+		return SuccessStyle.Render(GraphSuccess)
 	default:
 		return GraphPending
 	}

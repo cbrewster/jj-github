@@ -80,6 +80,17 @@ func (s *Stack) MutableRevisions() []Revision {
 	return result
 }
 
+// RevisionsNeedingSync returns the count of revisions that need to be synced
+func (s *Stack) RevisionsNeedingSync() int {
+	count := 0
+	for _, r := range s.Revisions {
+		if !r.IsImmutable && r.NeedsSync {
+			count++
+		}
+	}
+	return count
+}
+
 // View renders the full stack
 func (s Stack) View(spinner Spinner) string {
 	var sb strings.Builder
