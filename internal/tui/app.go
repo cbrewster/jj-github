@@ -30,11 +30,12 @@ const (
 // Messages for async operations
 type (
 	RevisionsLoadedMsg struct {
-		Changes     []jj.Change
-		TrunkName   string
-		ExistingPRs map[string]*gogithub.PullRequest
-		NeedsSync   bool
-		Err         error
+		Changes       []jj.Change
+		TrunkName     string
+		ExistingPRs   map[string]*gogithub.PullRequest
+		NeedsSync     bool
+		NeedsSyncByID map[string]bool // Maps change ID to whether it needs sync
+		Err           error
 	}
 
 	RevisionSyncedMsg struct {
@@ -128,11 +129,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stack = components.NewStack(msg.Changes, msg.TrunkName)
 		m.totalCount = len(m.stack.MutableRevisions())
 
-		// Set PR numbers for existing PRs on the stack
+		// Set PR numbers and sync status for existing PRs on the stack
 		for i := range m.stack.Revisions {
 			rev := &m.stack.Revisions[i]
 			if rev.IsImmutable {
 				continue
+			}
+			// Set whether this revision needs sync
+			if needsSync, ok := msg.NeedsSyncByID[rev.Change.ID]; ok {
+				rev.NeedsSync = needsSync
 			}
 			if pr, ok := m.existingPRs[rev.Change.GitPushBookmark]; ok {
 				rev.PRNumber = pr.GetNumber()
@@ -209,8 +214,13 @@ func (m Model) View() string {
 	case PhaseConfirmation:
 		sb.WriteString(m.stack.View(m.spinner))
 		sb.WriteString("\n")
-		count := len(m.stack.MutableRevisions())
-		fmt.Fprintf(&sb, "%d revision(s) will be synced to GitHub.\n\n", count)
+		syncCount := m.stack.RevisionsNeedingSync()
+		totalCount := len(m.stack.MutableRevisions())
+		if syncCount == totalCount {
+			fmt.Fprintf(&sb, "%d revision(s) will be synced to GitHub.\n\n", syncCount)
+		} else {
+			fmt.Fprintf(&sb, "%d of %d revision(s) will be synced to GitHub.\n\n", syncCount, totalCount)
+		}
 		sb.WriteString(m.help.View(m.keys))
 		sb.WriteString("\n")
 
@@ -288,8 +298,9 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 			return RevisionsLoadedMsg{Err: err}
 		}
 
-		// Check if sync is needed
+		// Check if sync is needed per revision
 		needsSync := false
+		needsSyncByID := make(map[string]bool)
 		changesByID := make(map[string]*jj.Change)
 		for i := range changes {
 			changesByID[changes[i].ID] = &changes[i]
@@ -310,13 +321,15 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 			pr, exists := existingPRs[change.GitPushBookmark]
 			if !exists {
 				needsSync = true
-				break
+				needsSyncByID[change.ID] = true
+				continue
 			}
 
 			// Check if local commit matches remote head (need to push if different)
 			if pr.GetHead().GetSHA() != change.CommitID {
 				needsSync = true
-				break
+				needsSyncByID[change.ID] = true
+				continue
 			}
 
 			// Check if PR metadata needs update
@@ -325,15 +338,20 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 				pr.GetBase().GetRef() != base ||
 				pr.GetDraft() != isDraft {
 				needsSync = true
-				break
+				needsSyncByID[change.ID] = true
+				continue
 			}
+
+			// This revision doesn't need sync
+			needsSyncByID[change.ID] = false
 		}
 
 		return RevisionsLoadedMsg{
-			Changes:     changes,
-			TrunkName:   trunkName,
-			ExistingPRs: existingPRs,
-			NeedsSync:   needsSync,
+			Changes:       changes,
+			TrunkName:     trunkName,
+			ExistingPRs:   existingPRs,
+			NeedsSync:     needsSync,
+			NeedsSyncByID: needsSyncByID,
 		}
 	}
 }
