@@ -27,6 +27,9 @@ const (
 	PhaseError
 )
 
+// Help separator between key bindings
+const helpSeparator = " • "
+
 // Messages for async operations
 type (
 	RevisionsLoadedMsg struct {
@@ -566,7 +569,7 @@ func renderHelp(keys KeyMap) string {
 	// Render separator and quit key in muted
 	if keys.Quit.Enabled() {
 		if b.Len() > 0 {
-			b.WriteString(components.MutedStyle.Render(" • "))
+			b.WriteString(components.MutedStyle.Render(helpSeparator))
 		}
 		renderKey(&b, keys.Quit, components.MutedStyle)
 	}
