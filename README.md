@@ -2,6 +2,8 @@
 
 A Jujutsu extension for managing stacked pull requests on GitHub. Each revision in your stack is mapped to a GitHub pull request, with bases automatically set to maintain stack dependencies.
 
+![jj-github demo](docs/demo.gif)
+
 ## Overview
 
 jj-github automates the workflow of creating and updating GitHub pull requests from Jujutsu revisions. It handles pushing changes, creating or updating pull requests based on revision descriptions, setting appropriate base branches, and maintaining stack comments that show the full PR stack in each pull request.
