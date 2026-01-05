@@ -39,8 +39,8 @@ type (
 	}
 
 	RevisionPushedMsg struct {
-		ChangeID string
-		Err      error
+		Change jj.Change
+		Err    error
 	}
 
 	RevisionSyncedMsg struct {
@@ -163,14 +163,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case RevisionPushedMsg:
 		if msg.Err != nil {
-			m.stack.SetRevisionError(msg.ChangeID, msg.Err)
+			m.stack.SetRevisionError(msg.Change.ID, msg.Err)
 			m.phase = PhaseError
 			m.err = msg.Err
 			return m, nil
 		}
 
 		// Push succeeded, now sync the PR
-		return m, m.syncRevisionPRCmd(msg.ChangeID)
+		return m, m.syncRevisionPRCmd(msg.Change)
 
 	case RevisionSyncedMsg:
 		if msg.Err != nil {
@@ -387,29 +387,20 @@ func (m Model) pushNextRevisionCmd() tea.Cmd {
 
 		// Push the branch
 		if err := jj.GitPush(change.ID); err != nil {
-			return RevisionPushedMsg{ChangeID: change.ID, Err: fmt.Errorf("push: %w", err)}
+			return RevisionPushedMsg{Change: change, Err: fmt.Errorf("push: %w", err)}
 		}
 
-		return RevisionPushedMsg{ChangeID: change.ID}
+		return RevisionPushedMsg{Change: change}
 	}
 }
 
-func (m Model) syncRevisionPRCmd(changeID string) tea.Cmd {
-	// Find the revision
-	var change jj.Change
-	for _, rev := range m.stack.Revisions {
-		if rev.Change.ID == changeID {
-			change = rev.Change
-			break
-		}
-	}
-
+func (m Model) syncRevisionPRCmd(change jj.Change) tea.Cmd {
 	// Determine if we're creating or updating
 	_, exists := m.existingPRs[change.GitPushBookmark]
 	if exists {
-		m.stack.SetRevisionState(changeID, components.StateInProgress, "Updating PR...")
+		m.stack.SetRevisionState(change.ID, components.StateInProgress, "Updating PR...")
 	} else {
-		m.stack.SetRevisionState(changeID, components.StateInProgress, "Creating PR...")
+		m.stack.SetRevisionState(change.ID, components.StateInProgress, "Creating PR...")
 	}
 
 	return func() tea.Msg {
