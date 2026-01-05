@@ -8,7 +8,6 @@ import (
 	"github.com/cbrewster/jj-github/internal/github"
 	"github.com/cbrewster/jj-github/internal/jj"
 	"github.com/cbrewster/jj-github/internal/tui/components"
-	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -63,7 +62,6 @@ type Model struct {
 	stack   components.Stack
 	spinner components.Spinner
 	keys    KeyMap
-	help    help.Model
 	err     error
 
 	// Tracking sync progress
@@ -84,14 +82,10 @@ type Model struct {
 
 // NewModel creates a new TUI model
 func NewModel(ctx context.Context, gh *github.Client, repo github.Repo, revset string) Model {
-	h := help.New()
-	h.ShortSeparator = " • "
-
 	return Model{
 		phase:       PhaseLoading,
 		spinner:     components.NewSpinner(),
 		keys:        DefaultKeyMap(),
-		help:        h,
 		ctx:         ctx,
 		gh:          gh,
 		repo:        repo,
@@ -238,7 +232,7 @@ func (m Model) View() string {
 		} else {
 			fmt.Fprintf(&sb, "%d of %d revision(s) will be synced to GitHub.\n\n", syncCount, totalCount)
 		}
-		sb.WriteString(renderHelp(m.keys, m.help.ShortSeparator))
+		sb.WriteString(renderHelp(m.keys))
 		sb.WriteString("\n")
 
 	case PhaseSyncing:
@@ -561,7 +555,7 @@ func (m Model) updateAllCommentsCmd() tea.Cmd {
 }
 
 // renderHelp renders the help view with custom styling for submit (magenta) and quit (muted)
-func renderHelp(keys KeyMap, separator string) string {
+func renderHelp(keys KeyMap) string {
 	var b strings.Builder
 
 	// Render submit key in magenta
@@ -572,7 +566,7 @@ func renderHelp(keys KeyMap, separator string) string {
 	// Render separator and quit key in muted
 	if keys.Quit.Enabled() {
 		if b.Len() > 0 {
-			b.WriteString(components.MutedStyle.Render(separator))
+			b.WriteString(components.MutedStyle.Render(" • "))
 		}
 		renderKey(&b, keys.Quit, components.MutedStyle)
 	}
