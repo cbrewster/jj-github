@@ -237,7 +237,7 @@ func (m Model) View() string {
 		} else {
 			fmt.Fprintf(&sb, "%d of %d revision(s) will be synced to GitHub.\n\n", syncCount, totalCount)
 		}
-		sb.WriteString(m.help.View(m.keys))
+		sb.WriteString(renderHelp(m.keys, m.help.ShortSeparator))
 		sb.WriteString("\n")
 
 	case PhaseSyncing:
@@ -557,4 +557,28 @@ func (m Model) updateAllCommentsCmd() tea.Cmd {
 
 		return AllCommentsUpdatedMsg{}
 	}
+}
+
+// renderHelp renders the help view with custom styling for submit (magenta) and quit (muted)
+func renderHelp(keys KeyMap, separator string) string {
+	var b strings.Builder
+
+	// Render submit key in magenta
+	if keys.Submit.Enabled() {
+		b.WriteString(components.AccentStyle.Render(keys.Submit.Help().Key))
+		b.WriteString(" ")
+		b.WriteString(components.AccentStyle.Render(keys.Submit.Help().Desc))
+	}
+
+	// Render separator and quit key in muted
+	if keys.Quit.Enabled() {
+		if b.Len() > 0 {
+			b.WriteString(components.MutedStyle.Render(separator))
+		}
+		b.WriteString(components.MutedStyle.Render(keys.Quit.Help().Key))
+		b.WriteString(" ")
+		b.WriteString(components.MutedStyle.Render(keys.Quit.Help().Desc))
+	}
+
+	return b.String()
 }
