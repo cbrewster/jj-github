@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	gogithub "github.com/google/go-github/v80/github"
 )
 
@@ -565,9 +566,7 @@ func renderHelp(keys KeyMap, separator string) string {
 
 	// Render submit key in magenta
 	if keys.Submit.Enabled() {
-		b.WriteString(components.AccentStyle.Render(keys.Submit.Help().Key))
-		b.WriteString(" ")
-		b.WriteString(components.AccentStyle.Render(keys.Submit.Help().Desc))
+		renderKey(&b, keys.Submit, components.AccentStyle)
 	}
 
 	// Render separator and quit key in muted
@@ -575,10 +574,15 @@ func renderHelp(keys KeyMap, separator string) string {
 		if b.Len() > 0 {
 			b.WriteString(components.MutedStyle.Render(separator))
 		}
-		b.WriteString(components.MutedStyle.Render(keys.Quit.Help().Key))
-		b.WriteString(" ")
-		b.WriteString(components.MutedStyle.Render(keys.Quit.Help().Desc))
+		renderKey(&b, keys.Quit, components.MutedStyle)
 	}
 
 	return b.String()
+}
+
+// renderKey renders a single key binding with the given style
+func renderKey(b *strings.Builder, k key.Binding, style lipgloss.Style) {
+	b.WriteString(style.Render(k.Help().Key))
+	b.WriteString(" ")
+	b.WriteString(style.Render(k.Help().Desc))
 }
