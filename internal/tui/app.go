@@ -38,6 +38,11 @@ type (
 		Err           error
 	}
 
+	RevisionPushedMsg struct {
+		ChangeID string
+		Err      error
+	}
+
 	RevisionSyncedMsg struct {
 		ChangeID string
 		PRNumber int
@@ -114,7 +119,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Submit) && m.phase == PhaseConfirmation:
 			m.phase = PhaseSyncing
 			m.currentIndex = 0
-			return m, m.syncNextRevisionCmd()
+			return m, m.pushNextRevisionCmd()
 		}
 
 	case RevisionsLoadedMsg:
@@ -156,6 +161,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = PhaseConfirmation
 		return m, nil
 
+	case RevisionPushedMsg:
+		if msg.Err != nil {
+			m.stack.SetRevisionError(msg.ChangeID, msg.Err)
+			m.phase = PhaseError
+			m.err = msg.Err
+			return m, nil
+		}
+
+		// Push succeeded, now sync the PR
+		return m, m.syncRevisionPRCmd(msg.ChangeID)
+
 	case RevisionSyncedMsg:
 		if msg.Err != nil {
 			m.stack.SetRevisionError(msg.ChangeID, msg.Err)
@@ -170,7 +186,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		mutableRevs := m.stack.MutableRevisions()
 		if m.currentIndex < len(mutableRevs) {
-			return m, m.syncNextRevisionCmd()
+			return m, m.pushNextRevisionCmd()
 		}
 
 		// Move to comments phase
@@ -356,7 +372,7 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 	}
 }
 
-func (m Model) syncNextRevisionCmd() tea.Cmd {
+func (m Model) pushNextRevisionCmd() tea.Cmd {
 	mutableRevs := m.stack.MutableRevisions()
 	// Revisions are in reverse order (current at top), so we process from the end
 	idx := len(mutableRevs) - 1 - m.currentIndex
@@ -364,17 +380,40 @@ func (m Model) syncNextRevisionCmd() tea.Cmd {
 		return nil
 	}
 	rev := mutableRevs[idx]
-	m.stack.SetRevisionState(rev.Change.ID, components.StateInProgress, "Pushing & syncing PR...")
+	m.stack.SetRevisionState(rev.Change.ID, components.StateInProgress, "Pushing...")
 
 	return func() tea.Msg {
 		change := rev.Change
 
-		// Step 1: Push the branch
+		// Push the branch
 		if err := jj.GitPush(change.ID); err != nil {
-			return RevisionSyncedMsg{ChangeID: change.ID, Err: fmt.Errorf("push: %w", err)}
+			return RevisionPushedMsg{ChangeID: change.ID, Err: fmt.Errorf("push: %w", err)}
 		}
 
-		// Step 2: Create or update the PR
+		return RevisionPushedMsg{ChangeID: change.ID}
+	}
+}
+
+func (m Model) syncRevisionPRCmd(changeID string) tea.Cmd {
+	// Find the revision
+	var change jj.Change
+	for _, rev := range m.stack.Revisions {
+		if rev.Change.ID == changeID {
+			change = rev.Change
+			break
+		}
+	}
+
+	// Determine if we're creating or updating
+	_, exists := m.existingPRs[change.GitPushBookmark]
+	if exists {
+		m.stack.SetRevisionState(changeID, components.StateInProgress, "Updating PR...")
+	} else {
+		m.stack.SetRevisionState(changeID, components.StateInProgress, "Creating PR...")
+	}
+
+	return func() tea.Msg {
+		// Build the PR options
 		changesByID := make(map[string]*jj.Change)
 		for i := range m.changes {
 			changesByID[m.changes[i].ID] = &m.changes[i]
