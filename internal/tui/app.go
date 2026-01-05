@@ -8,9 +8,9 @@ import (
 	"github.com/cbrewster/jj-github/internal/github"
 	"github.com/cbrewster/jj-github/internal/jj"
 	"github.com/cbrewster/jj-github/internal/tui/components"
-	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	gogithub "github.com/google/go-github/v80/github"
 )
 
@@ -26,6 +26,9 @@ const (
 	PhaseComplete
 	PhaseError
 )
+
+// Help separator between key bindings
+const helpSeparator = " • "
 
 // Messages for async operations
 type (
@@ -62,7 +65,6 @@ type Model struct {
 	stack   components.Stack
 	spinner components.Spinner
 	keys    KeyMap
-	help    help.Model
 	err     error
 
 	// Tracking sync progress
@@ -83,14 +85,10 @@ type Model struct {
 
 // NewModel creates a new TUI model
 func NewModel(ctx context.Context, gh *github.Client, repo github.Repo, revset string) Model {
-	h := help.New()
-	h.ShortSeparator = " • "
-
 	return Model{
 		phase:       PhaseLoading,
 		spinner:     components.NewSpinner(),
 		keys:        DefaultKeyMap(),
-		help:        h,
 		ctx:         ctx,
 		gh:          gh,
 		repo:        repo,
@@ -237,7 +235,7 @@ func (m Model) View() string {
 		} else {
 			fmt.Fprintf(&sb, "%d of %d revision(s) will be synced to GitHub.\n\n", syncCount, totalCount)
 		}
-		sb.WriteString(m.help.View(m.keys))
+		sb.WriteString(renderHelp(m.keys))
 		sb.WriteString("\n")
 
 	case PhaseSyncing:
@@ -557,4 +555,31 @@ func (m Model) updateAllCommentsCmd() tea.Cmd {
 
 		return AllCommentsUpdatedMsg{}
 	}
+}
+
+// renderHelp renders the help view with custom styling for submit (magenta) and quit (muted)
+func renderHelp(keys KeyMap) string {
+	var b strings.Builder
+
+	// Render submit key in magenta
+	if keys.Submit.Enabled() {
+		renderKey(&b, keys.Submit, components.AccentStyle)
+	}
+
+	// Render separator and quit key in muted
+	if keys.Quit.Enabled() {
+		if b.Len() > 0 {
+			b.WriteString(components.MutedStyle.Render(helpSeparator))
+		}
+		renderKey(&b, keys.Quit, components.MutedStyle)
+	}
+
+	return b.String()
+}
+
+// renderKey renders a single key binding with the given style
+func renderKey(b *strings.Builder, k key.Binding, style lipgloss.Style) {
+	b.WriteString(style.Render(k.Help().Key))
+	b.WriteString(" ")
+	b.WriteString(style.Render(k.Help().Desc))
 }
