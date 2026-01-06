@@ -364,8 +364,9 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 			}
 
 			// Check if PR metadata needs update
+			// Normalize body comparison by trimming trailing whitespace, as GitHub may strip it
 			if pr.GetTitle() != title ||
-				pr.GetBody() != body ||
+				strings.TrimRight(pr.GetBody(), " \t\n\r") != strings.TrimRight(body, " \t\n\r") ||
 				pr.GetBase().GetRef() != base ||
 				pr.GetDraft() != isDraft {
 				needsSync = true
@@ -438,8 +439,9 @@ func (m Model) syncRevisionPRCmd(change jj.Change) tea.Cmd {
 
 		if pr, ok := m.existingPRs[change.GitPushBookmark]; ok {
 			// Check if update needed
+			// Normalize body comparison by trimming trailing whitespace, as GitHub may strip it
 			if pr.GetTitle() == title &&
-				pr.GetBody() == body &&
+				strings.TrimRight(pr.GetBody(), " \t\n\r") == strings.TrimRight(body, " \t\n\r") &&
 				pr.GetHead().GetRef() == change.GitPushBookmark &&
 				pr.GetBase().GetRef() == base &&
 				pr.GetDraft() == isDraft {
