@@ -293,11 +293,16 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 			return RevisionsLoadedMsg{Err: err}
 		}
 
-		// Collect branches for mutable changes only (not trunk)
+		// Collect branches and mutable changes (filter out immutable and empty changes)
 		var branches []string
+		var mutableChanges []jj.Change
 		for _, change := range changes {
 			if !change.Immutable && change.Description != "" {
-				branches = append(branches, change.GitPushBookmark)
+				mutableChanges = append(mutableChanges, change)
+				// Only add non-empty branch names to prevent fetching all branches
+				if change.GitPushBookmark != "" {
+					branches = append(branches, change.GitPushBookmark)
+				}
 			}
 		}
 
@@ -315,14 +320,6 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 		if len(changes) > 0 && changes[0].Immutable {
 			if len(changes[0].Bookmarks) > 0 {
 				trunkName = changes[0].Bookmarks[0].Name
-			}
-		}
-
-		// Re-collect mutable changes after fetch
-		var mutableChanges []jj.Change
-		for _, change := range changes {
-			if !change.Immutable && change.Description != "" {
-				mutableChanges = append(mutableChanges, change)
 			}
 		}
 
