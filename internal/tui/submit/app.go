@@ -1,4 +1,4 @@
-package tui
+package submit
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	gogithub "github.com/google/go-github/v80/github"
 )
 
-// Phase represents the current phase of the sync workflow
+// Phase represents the current phase of the submit workflow
 type Phase int
 
 const (
@@ -218,13 +218,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the UI
 func (m Model) View() string {
 	var sb strings.Builder
-	
+
 	// Default terminal width if not yet received
 	width := m.width
 	if width == 0 {
 		width = 80 // default fallback
 	}
-	
+
 	viewOpts := components.ViewOptions{
 		RepoOwner: m.repo.Owner,
 		RepoName:  m.repo.Name,
