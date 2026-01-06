@@ -66,6 +66,7 @@ type Model struct {
 	spinner components.Spinner
 	keys    KeyMap
 	err     error
+	width   int // Terminal width
 
 	// Tracking sync progress
 	currentIndex int
@@ -110,6 +111,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		return m, nil
+
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, m.keys.Quit):
@@ -213,6 +218,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the UI
 func (m Model) View() string {
 	var sb strings.Builder
+	
+	// Default terminal width if not yet received
+	width := m.width
+	if width == 0 {
+		width = 80 // default fallback
+	}
+	
+	viewOpts := components.ViewOptions{
+		RepoOwner: m.repo.Owner,
+		RepoName:  m.repo.Name,
+		Width:     width,
+	}
 
 	switch m.phase {
 	case PhaseLoading:
@@ -220,13 +237,13 @@ func (m Model) View() string {
 		sb.WriteString(" Fetching remote state...\n")
 
 	case PhaseUpToDate:
-		sb.WriteString(m.stack.View(m.spinner))
+		sb.WriteString(m.stack.View(m.spinner, viewOpts))
 		sb.WriteString("\n")
 		sb.WriteString(components.SuccessStyle.Render("All PRs are up to date!"))
 		sb.WriteString("\n")
 
 	case PhaseConfirmation:
-		sb.WriteString(m.stack.View(m.spinner))
+		sb.WriteString(m.stack.View(m.spinner, viewOpts))
 		sb.WriteString("\n")
 		syncCount := m.stack.RevisionsNeedingSync()
 		totalCount := len(m.stack.MutableRevisions())
@@ -239,21 +256,21 @@ func (m Model) View() string {
 		sb.WriteString("\n")
 
 	case PhaseSyncing:
-		sb.WriteString(m.stack.View(m.spinner))
+		sb.WriteString(m.stack.View(m.spinner, viewOpts))
 		sb.WriteString("Syncing revisions...\n\n")
 
 	case PhaseUpdatingComments:
-		sb.WriteString(m.stack.View(m.spinner))
+		sb.WriteString(m.stack.View(m.spinner, viewOpts))
 		sb.WriteString(m.spinner.View())
 		sb.WriteString(" Updating stack comments...\n\n")
 
 	case PhaseComplete:
-		sb.WriteString(m.stack.View(m.spinner))
+		sb.WriteString(m.stack.View(m.spinner, viewOpts))
 		count := len(m.stack.MutableRevisions())
 		fmt.Fprintf(&sb, "%d pull request(s) synced successfully.\n", count)
 
 	case PhaseError:
-		sb.WriteString(m.stack.View(m.spinner))
+		sb.WriteString(m.stack.View(m.spinner, viewOpts))
 		sb.WriteString(components.ErrorStyle.Render("Sync failed"))
 		sb.WriteString("\n\n")
 		if m.err != nil {

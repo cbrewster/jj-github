@@ -92,14 +92,14 @@ func (s *Stack) RevisionsNeedingSync() int {
 }
 
 // View renders the full stack
-func (s Stack) View(spinner Spinner) string {
+func (s Stack) View(spinner Spinner, opts ViewOptions) string {
 	var sb strings.Builder
 	sb.WriteString("\nRevisions:\n\n")
 
 	for i, rev := range s.Revisions {
 		// Show connector unless this is the last revision (trunk)
 		showConnector := i < len(s.Revisions)-1
-		sb.WriteString(rev.View(spinner, showConnector))
+		sb.WriteString(rev.View(spinner, showConnector, opts))
 	}
 
 	return sb.String()
