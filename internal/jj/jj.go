@@ -113,6 +113,12 @@ func GitPush(changeID string) error {
 }
 
 // GitFetch fetches from the Git remote to get the latest state.
-func GitFetch() error {
-	return exec.Command("jj", "git", "fetch").Run()
+// If branches are provided, only those branches are fetched.
+// If branches is empty, all branches are fetched.
+func GitFetch(branches ...string) error {
+	args := []string{"git", "fetch"}
+	for _, branch := range branches {
+		args = append(args, "-b", branch)
+	}
+	return exec.Command("jj", args...).Run()
 }

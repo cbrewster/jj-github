@@ -286,15 +286,28 @@ func (m Model) View() string {
 
 func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 	return func() tea.Msg {
-		// Fetch from remote to get latest state (read-only for local repo)
-		if err := jj.GitFetch(); err != nil {
-			return RevisionsLoadedMsg{Err: fmt.Errorf("git fetch: %w", err)}
-		}
-
-		// Load revisions
+		// First, load revisions to identify which branches to fetch
+		// (before fetching, to avoid updating trunk which could cause rebasing issues)
 		changes, err := jj.GetChanges(fmt.Sprintf("trunk()::(%s) & ~empty()", m.revset))
 		if err != nil {
 			return RevisionsLoadedMsg{Err: err}
+		}
+
+		// Collect branches for mutable changes only (not trunk)
+		var branches []string
+		for _, change := range changes {
+			if !change.Immutable && change.Description != "" {
+				branches = append(branches, change.GitPushBookmark)
+			}
+		}
+
+		// Fetch only the mutable revision branches from remote (not trunk)
+		// This prevents trunk from being updated which could cause the stack
+		// to show as empty since revisions would no longer be descendants of trunk()
+		if len(branches) > 0 {
+			if err := jj.GitFetch(branches...); err != nil {
+				return RevisionsLoadedMsg{Err: fmt.Errorf("git fetch: %w", err)}
+			}
 		}
 
 		// Determine trunk name
@@ -305,12 +318,10 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 			}
 		}
 
-		// Collect branches for mutable changes
-		var branches []string
+		// Re-collect mutable changes after fetch
 		var mutableChanges []jj.Change
 		for _, change := range changes {
 			if !change.Immutable && change.Description != "" {
-				branches = append(branches, change.GitPushBookmark)
 				mutableChanges = append(mutableChanges, change)
 			}
 		}
