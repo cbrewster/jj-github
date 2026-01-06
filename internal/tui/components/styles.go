@@ -61,9 +61,10 @@ var (
 	ChangeIDRestStyle = lipgloss.NewStyle().
 				Foreground(ColorMuted)
 
-	// PR number style
-	PRNumberStyle = lipgloss.NewStyle().
-			Foreground(ColorMuted)
+	// PR link style
+	PRLinkStyle = lipgloss.NewStyle().
+			Foreground(ColorMuted).
+			Underline(true)
 
 	// Status message style (sub-status below revision)
 	StatusMsgStyle = lipgloss.NewStyle().

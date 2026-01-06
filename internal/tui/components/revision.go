@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/cbrewster/jj-github/internal/jj"
+	"github.com/rivo/uniseg"
 )
 
 // RevisionState represents the sync state of a revision
@@ -47,14 +48,21 @@ func NewTrunkRevision(branchName string) Revision {
 	}
 }
 
+// ViewOptions contains options for rendering a revision
+type ViewOptions struct {
+	RepoOwner string
+	RepoName  string
+	Width     int
+}
+
 // View renders the revision row
-func (r Revision) View(spinner Spinner, showConnector bool) string {
+func (r Revision) View(spinner Spinner, showConnector bool, opts ViewOptions) string {
 	var sb strings.Builder
 
 	// Determine the graph symbol
 	symbol := r.graphSymbol(spinner)
 
-	// Build the main line: symbol + change ID + description + PR number
+	// Build the main line: symbol + change ID + description + PR link
 	if r.IsImmutable {
 		// Trunk/immutable revision
 		sb.WriteString(MutedStyle.Render(symbol))
@@ -68,24 +76,41 @@ func (r Revision) View(spinner Spinner, showConnector bool) string {
 		if len(changeID) > 8 {
 			changeID = changeID[:8]
 		}
-		sb.WriteString(ChangeIDShortStyle.Render(r.Change.ShortID))
-		sb.WriteString(ChangeIDRestStyle.Render(changeID[len(r.Change.ShortID):]))
+		changeIDStr := ChangeIDShortStyle.Render(r.Change.ShortID) +
+			ChangeIDRestStyle.Render(changeID[len(r.Change.ShortID):])
+		sb.WriteString(changeIDStr)
 		sb.WriteString("  ")
 
-		// Description (first line, truncated)
-		desc := r.firstLine(r.Change.Description)
-		if len(desc) > 40 {
-			desc = desc[:37] + "..."
+		// Build PR link or "(new PR)" text
+		var prText string
+		if r.PRNumber > 0 {
+			prText = fmt.Sprintf("https://github.com/%s/%s/pull/%d", opts.RepoOwner, opts.RepoName, r.PRNumber)
+		} else {
+			prText = "(new PR)"
 		}
+
+		// Calculate available width for description
+		// Layout: symbol(1-2) + "  " + changeID(8) + "  " + description + "  " + prLink
+		// Symbol width varies (✓, ○, etc.) but we'll use 2 as a safe estimate
+		symbolWidth := 2  // graph symbol width
+		spacing := 2 + 2 + 2  // three "  " separators
+		changeIDWidth := 8    // fixed change ID width
+		prTextWidth := uniseg.StringWidth(prText)
+		
+		fixedWidth := symbolWidth + spacing + changeIDWidth + prTextWidth
+		availableWidth := opts.Width - fixedWidth
+		if availableWidth < 10 {
+			availableWidth = 10 // Minimum width for description
+		}
+
+		// Description (first line, truncated based on available width)
+		desc := r.firstLine(r.Change.Description)
+		desc = truncateString(desc, availableWidth)
 		sb.WriteString(desc)
 
-		// PR number if exists
+		// PR link
 		sb.WriteString("  ")
-		if r.PRNumber > 0 {
-			sb.WriteString(PRNumberStyle.Render(fmt.Sprintf("#%d", r.PRNumber)))
-		} else {
-			sb.WriteString(PRNumberStyle.Render("(new PR)"))
-		}
+		sb.WriteString(PRLinkStyle.Render(prText))
 	}
 
 	sb.WriteString("\n")
@@ -133,4 +158,45 @@ func (r Revision) firstLine(s string) string {
 		return s[:idx]
 	}
 	return s
+}
+
+// truncateString truncates a string to the specified width, adding "..." if truncated.
+// It uses grapheme clustering to handle Unicode correctly.
+func truncateString(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	
+	// If the string width is already within limits, return as-is
+	width := uniseg.StringWidth(s)
+	if width <= maxWidth {
+		return s
+	}
+	
+	// Need to truncate - determine if we can fit ellipsis
+	targetWidth := maxWidth
+	addEllipsis := false
+	if maxWidth > 3 {
+		targetWidth = maxWidth - 3
+		addEllipsis = true
+	}
+	
+	var result strings.Builder
+	currentWidth := 0
+	
+	gr := uniseg.NewGraphemes(s)
+	for gr.Next() {
+		grapheme := gr.Str()
+		graphemeWidth := uniseg.StringWidth(grapheme)
+		if currentWidth+graphemeWidth > targetWidth {
+			break
+		}
+		result.WriteString(grapheme)
+		currentWidth += graphemeWidth
+	}
+	
+	if addEllipsis {
+		result.WriteString("...")
+	}
+	return result.String()
 }
