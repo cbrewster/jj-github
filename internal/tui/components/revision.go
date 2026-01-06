@@ -110,7 +110,7 @@ func (r Revision) View(spinner Spinner, showConnector bool, opts ViewOptions) st
 
 		// PR link
 		sb.WriteString("  ")
-		sb.WriteString(PRNumberStyle.Render(prText))
+		sb.WriteString(PRLinkStyle.Render(prText))
 	}
 
 	sb.WriteString("\n")
