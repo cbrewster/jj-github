@@ -128,6 +128,18 @@ func TestTruncateString(t *testing.T) {
 			MaxWidth: 10,
 			Expected: "",
 		},
+		{
+			Name:     "unicode characters",
+			Input:    "héllo wörld",
+			MaxWidth: 8,
+			Expected: "héllo...",
+		},
+		{
+			Name:     "unicode short width no ellipsis",
+			Input:    "héllo",
+			MaxWidth: 3,
+			Expected: "hél",
+		},
 	} {
 		t.Run(tc.Name, func(t *testing.T) {
 			result := truncateString(tc.Input, tc.MaxWidth)

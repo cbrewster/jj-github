@@ -173,12 +173,14 @@ func truncateString(s string, maxWidth int) string {
 		return s
 	}
 	
-	// Need to truncate - account for "..." (3 chars width)
-	if maxWidth <= 3 {
-		return s[:maxWidth] // Not enough room for ellipsis
+	// Need to truncate - determine if we can fit ellipsis
+	targetWidth := maxWidth
+	addEllipsis := false
+	if maxWidth > 3 {
+		targetWidth = maxWidth - 3
+		addEllipsis = true
 	}
 	
-	targetWidth := maxWidth - 3
 	var result strings.Builder
 	currentWidth := 0
 	
@@ -193,6 +195,8 @@ func truncateString(s string, maxWidth int) string {
 		currentWidth += graphemeWidth
 	}
 	
-	result.WriteString("...")
+	if addEllipsis {
+		result.WriteString("...")
+	}
 	return result.String()
 }
