@@ -21,6 +21,7 @@ const (
 	PhaseLoading Phase = iota
 	PhaseUpToDate
 	PhaseConfirmation
+	PhaseOwnershipConfirmation
 	PhaseSyncing
 	PhaseUpdatingComments
 	PhaseComplete
@@ -30,15 +31,26 @@ const (
 // Help separator between key bindings
 const helpSeparator = " • "
 
+// OwnershipIssue describes a PR ownership problem that requires user confirmation.
+type OwnershipIssue struct {
+	ChangeID   string // The change that would modify someone else's PR
+	PRNumber   int
+	PROwner    string // GitHub username of PR owner
+	IsNotOnTip bool   // True if stacked on an outdated version of the PR
+	TipSHA     string // The current HEAD SHA of the PR (if IsNotOnTip)
+}
+
 // Messages for async operations
 type (
 	RevisionsLoadedMsg struct {
-		Changes       []jj.Change
-		TrunkName     string
-		ExistingPRs   map[string]*gogithub.PullRequest
-		NeedsSync     bool
-		NeedsSyncByID map[string]bool // Maps change ID to whether it needs sync
-		Err           error
+		Changes         []jj.Change
+		TrunkName       string
+		ExistingPRs     map[string]*gogithub.PullRequest
+		NeedsSync       bool
+		NeedsSyncByID   map[string]bool  // Maps change ID to whether it needs sync
+		OwnershipIssues []OwnershipIssue // PRs owned by others that would be modified
+		CurrentUser     string           // The authenticated GitHub user
+		Err             error
 	}
 
 	RevisionPushedMsg struct {
@@ -79,9 +91,11 @@ type Model struct {
 	revset string
 
 	// Data from loading phase
-	changes       []jj.Change
-	existingPRs   map[string]*gogithub.PullRequest
-	stackComments map[int]*gogithub.IssueComment
+	changes         []jj.Change
+	existingPRs     map[string]*gogithub.PullRequest
+	stackComments   map[int]*gogithub.IssueComment
+	currentUser     string           // The authenticated GitHub user
+	ownershipIssues []OwnershipIssue // PRs owned by others that need confirmation
 }
 
 // NewModel creates a new TUI model
@@ -120,6 +134,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
 		case key.Matches(msg, m.keys.Submit) && m.phase == PhaseConfirmation:
+			// Check if we need ownership confirmation first
+			if len(m.ownershipIssues) > 0 {
+				m.phase = PhaseOwnershipConfirmation
+				return m, nil
+			}
+			m.phase = PhaseSyncing
+			m.currentIndex = 0
+			return m, m.pushNextRevisionCmd()
+		case key.Matches(msg, m.keys.Submit) && m.phase == PhaseOwnershipConfirmation:
+			// User confirmed updating others' PRs
 			m.phase = PhaseSyncing
 			m.currentIndex = 0
 			return m, m.pushNextRevisionCmd()
@@ -134,6 +158,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.changes = msg.Changes
 		m.existingPRs = msg.ExistingPRs
+		m.currentUser = msg.CurrentUser
+		m.ownershipIssues = msg.OwnershipIssues
 		m.stack = components.NewStack(msg.Changes, msg.TrunkName)
 		m.totalCount = len(m.stack.MutableRevisions())
 
@@ -147,7 +173,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if needsSync, ok := msg.NeedsSyncByID[rev.Change.ID]; ok {
 				rev.NeedsSync = needsSync
 			}
-			if pr, ok := m.existingPRs[rev.Change.GitPushBookmark]; ok {
+			if pr, ok := m.existingPRs[rev.Change.Branch]; ok {
 				rev.PRNumber = pr.GetNumber()
 				if !msg.NeedsSync {
 					// Mark as success if everything is up to date
@@ -255,6 +281,26 @@ func (m Model) View() string {
 		sb.WriteString(renderHelp(m.keys))
 		sb.WriteString("\n")
 
+	case PhaseOwnershipConfirmation:
+		sb.WriteString(m.stack.View(m.spinner, viewOpts))
+		sb.WriteString("\n")
+		sb.WriteString(components.WarningStyle.Render("Warning: This will modify PRs owned by other users:"))
+		sb.WriteString("\n\n")
+		for _, issue := range m.ownershipIssues {
+			if issue.IsNotOnTip {
+				fmt.Fprintf(&sb, "  • PR #%d (owned by @%s) - your stack is not rebased to their latest commit\n",
+					issue.PRNumber, issue.PROwner)
+			} else {
+				fmt.Fprintf(&sb, "  • PR #%d (owned by @%s)\n", issue.PRNumber, issue.PROwner)
+			}
+		}
+		sb.WriteString("\n")
+		sb.WriteString("Press ")
+		sb.WriteString(components.AccentStyle.Render("enter"))
+		sb.WriteString(" to continue anyway, or ")
+		sb.WriteString(components.MutedStyle.Render("q"))
+		sb.WriteString(" to cancel.\n")
+
 	case PhaseSyncing:
 		sb.WriteString(m.stack.View(m.spinner, viewOpts))
 		sb.WriteString("Syncing revisions...\n\n")
@@ -286,6 +332,12 @@ func (m Model) View() string {
 
 func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 	return func() tea.Msg {
+		// Fetch the current authenticated user
+		currentUser, err := m.gh.GetAuthenticatedUser(m.ctx)
+		if err != nil {
+			return RevisionsLoadedMsg{Err: fmt.Errorf("get authenticated user: %w", err)}
+		}
+
 		// Fetch from remote to get latest state (read-only for local repo)
 		if err := jj.GitFetch(); err != nil {
 			return RevisionsLoadedMsg{Err: fmt.Errorf("git fetch: %w", err)}
@@ -294,6 +346,11 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 		// Load revisions
 		changes, err := jj.GetChanges(fmt.Sprintf("trunk()::(%s) & ~empty()", m.revset))
 		if err != nil {
+			return RevisionsLoadedMsg{Err: err}
+		}
+
+		// Compute effective branches (prefers existing tracked bookmarks)
+		if err := jj.ComputeEffectiveBranches(changes); err != nil {
 			return RevisionsLoadedMsg{Err: err}
 		}
 
@@ -310,16 +367,17 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 		var mutableChanges []jj.Change
 		for _, change := range changes {
 			if !change.Immutable && change.Description != "" {
-				branches = append(branches, change.GitPushBookmark)
+				branches = append(branches, change.Branch)
 				mutableChanges = append(mutableChanges, change)
 			}
 		}
 
 		if len(mutableChanges) == 0 {
 			return RevisionsLoadedMsg{
-				Changes:   changes,
-				TrunkName: trunkName,
-				NeedsSync: false,
+				Changes:     changes,
+				TrunkName:   trunkName,
+				NeedsSync:   false,
+				CurrentUser: currentUser,
 			}
 		}
 
@@ -329,17 +387,21 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 			return RevisionsLoadedMsg{Err: err}
 		}
 
-		// Check if sync is needed per revision
-		needsSync := false
-		needsSyncByID := make(map[string]bool)
+		// Build change lookup maps
 		changesByID := make(map[string]*jj.Change)
 		for i := range changes {
 			changesByID[changes[i].ID] = &changes[i]
 		}
 
+		// Check if sync is needed per revision and detect ownership issues
+		needsSync := false
+		needsSyncByID := make(map[string]bool)
+		var ownershipIssues []OwnershipIssue
+		seenOwnershipIssues := make(map[string]bool) // key: "prNumber:isNotOnTip"
+
 		for _, change := range mutableChanges {
 			parent := changesByID[change.Parents[0].ChangeID]
-			base := parent.GitPushBookmark
+			base := parent.Branch
 			if parent.Immutable {
 				if len(parent.Bookmarks) > 0 {
 					base = parent.Bookmarks[0].Name
@@ -349,11 +411,52 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 			title, body, _ := strings.Cut(change.Description, "\n")
 			isDraft := strings.Contains(strings.ToLower(title), "wip")
 
-			pr, exists := existingPRs[change.GitPushBookmark]
+			pr, exists := existingPRs[change.Branch]
 			if !exists {
 				needsSync = true
 				needsSyncByID[change.ID] = true
 				continue
+			}
+
+			// Check ownership - if PR exists and is owned by someone else
+			prOwner := pr.GetUser().GetLogin()
+			if prOwner != currentUser {
+				// This is someone else's PR - check if we're modifying it
+				if pr.GetHead().GetSHA() != change.CommitID {
+					// We would be pushing to their PR
+					issueKey := fmt.Sprintf("%d:false", pr.GetNumber())
+					if !seenOwnershipIssues[issueKey] {
+						seenOwnershipIssues[issueKey] = true
+						ownershipIssues = append(ownershipIssues, OwnershipIssue{
+							ChangeID: change.ID,
+							PRNumber: pr.GetNumber(),
+							PROwner:  prOwner,
+						})
+					}
+				}
+			}
+
+			// Check if parent is someone else's PR and we're not on the tip
+			if !parent.Immutable {
+				if parentPR, parentExists := existingPRs[parent.Branch]; parentExists {
+					parentPROwner := parentPR.GetUser().GetLogin()
+					if parentPROwner != currentUser {
+						// Stacked on someone else's PR - check if we're on their latest
+						if parentPR.GetHead().GetSHA() != parent.CommitID {
+							issueKey := fmt.Sprintf("%d:true", parentPR.GetNumber())
+							if !seenOwnershipIssues[issueKey] {
+								seenOwnershipIssues[issueKey] = true
+								ownershipIssues = append(ownershipIssues, OwnershipIssue{
+									ChangeID:   change.ID,
+									PRNumber:   parentPR.GetNumber(),
+									PROwner:    parentPROwner,
+									IsNotOnTip: true,
+									TipSHA:     parentPR.GetHead().GetSHA(),
+								})
+							}
+						}
+					}
+				}
 			}
 
 			// Check if local commit matches remote head (need to push if different)
@@ -379,11 +482,13 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 		}
 
 		return RevisionsLoadedMsg{
-			Changes:       changes,
-			TrunkName:     trunkName,
-			ExistingPRs:   existingPRs,
-			NeedsSync:     needsSync,
-			NeedsSyncByID: needsSyncByID,
+			Changes:         changes,
+			TrunkName:       trunkName,
+			ExistingPRs:     existingPRs,
+			NeedsSync:       needsSync,
+			NeedsSyncByID:   needsSyncByID,
+			OwnershipIssues: ownershipIssues,
+			CurrentUser:     currentUser,
 		}
 	}
 }
@@ -412,7 +517,7 @@ func (m Model) pushNextRevisionCmd() tea.Cmd {
 
 func (m Model) syncRevisionPRCmd(change jj.Change) tea.Cmd {
 	// Determine if we're creating or updating
-	_, exists := m.existingPRs[change.GitPushBookmark]
+	_, exists := m.existingPRs[change.Branch]
 	if exists {
 		m.stack.SetRevisionState(change.ID, components.StateInProgress, "Updating PR...")
 	} else {
@@ -427,7 +532,7 @@ func (m Model) syncRevisionPRCmd(change jj.Change) tea.Cmd {
 		}
 
 		parent := changesByID[change.Parents[0].ChangeID]
-		base := parent.GitPushBookmark
+		base := parent.Branch
 		if parent.Immutable {
 			if len(parent.Bookmarks) > 0 {
 				base = parent.Bookmarks[0].Name
@@ -437,12 +542,12 @@ func (m Model) syncRevisionPRCmd(change jj.Change) tea.Cmd {
 		title, body, _ := strings.Cut(change.Description, "\n")
 		isDraft := strings.Contains(strings.ToLower(title), "wip")
 
-		if pr, ok := m.existingPRs[change.GitPushBookmark]; ok {
+		if pr, ok := m.existingPRs[change.Branch]; ok {
 			// Check if update needed
 			// Normalize body comparison by trimming trailing whitespace, as GitHub may strip it
 			if pr.GetTitle() == title &&
 				strings.TrimRight(pr.GetBody(), " \t\n\r") == strings.TrimRight(body, " \t\n\r") &&
-				pr.GetHead().GetRef() == change.GitPushBookmark &&
+				pr.GetHead().GetRef() == change.Branch &&
 				pr.GetBase().GetRef() == base &&
 				pr.GetDraft() == isDraft {
 				return RevisionSyncedMsg{
@@ -455,7 +560,7 @@ func (m Model) syncRevisionPRCmd(change jj.Change) tea.Cmd {
 			err := m.gh.UpdatePullRequest(m.ctx, m.repo, *pr.Number, github.PullRequestOptions{
 				Title:  title,
 				Body:   body,
-				Branch: change.GitPushBookmark,
+				Branch: change.Branch,
 				Base:   base,
 				Draft:  isDraft,
 			})
@@ -471,7 +576,7 @@ func (m Model) syncRevisionPRCmd(change jj.Change) tea.Cmd {
 		pr, err := m.gh.CreatePullRequest(m.ctx, m.repo, github.PullRequestOptions{
 			Title:  title,
 			Body:   body,
-			Branch: change.GitPushBookmark,
+			Branch: change.Branch,
 			Base:   base,
 			Draft:  isDraft,
 		})
@@ -479,7 +584,7 @@ func (m Model) syncRevisionPRCmd(change jj.Change) tea.Cmd {
 			return RevisionSyncedMsg{ChangeID: change.ID, Err: err}
 		}
 		// Store for later use
-		m.existingPRs[change.GitPushBookmark] = pr
+		m.existingPRs[change.Branch] = pr
 		return RevisionSyncedMsg{
 			ChangeID: change.ID,
 			PRNumber: pr.GetNumber(),
@@ -512,7 +617,7 @@ func (m Model) updateAllCommentsCmd() tea.Cmd {
 				continue
 			}
 
-			pr, ok := m.existingPRs[rev.Change.GitPushBookmark]
+			pr, ok := m.existingPRs[rev.Change.Branch]
 			if !ok {
 				continue
 			}
@@ -527,7 +632,7 @@ func (m Model) updateAllCommentsCmd() tea.Cmd {
 				if r.IsImmutable {
 					continue
 				}
-				prForRev, ok := m.existingPRs[r.Change.GitPushBookmark]
+				prForRev, ok := m.existingPRs[r.Change.Branch]
 				if !ok {
 					continue
 				}

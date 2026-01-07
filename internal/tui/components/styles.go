@@ -48,6 +48,11 @@ var (
 	YellowStyle = lipgloss.NewStyle().
 			Foreground(ColorYellow)
 
+	// Warning text style
+	WarningStyle = lipgloss.NewStyle().
+			Foreground(ColorYellow).
+			Bold(true)
+
 	// Help text style
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted)

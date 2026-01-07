@@ -36,6 +36,15 @@ func NewClient() (*Client, error) {
 	}, nil
 }
 
+// GetAuthenticatedUser returns the login of the currently authenticated user.
+func (c *Client) GetAuthenticatedUser(ctx context.Context) (string, error) {
+	user, _, err := c.client.Users.Get(ctx, "")
+	if err != nil {
+		return "", fmt.Errorf("get authenticated user: %w", err)
+	}
+	return user.GetLogin(), nil
+}
+
 // GetPullRequestsForBranches gets all the open pull requests for the specified branches.
 // This expects only a single pull request to be open per branch.
 func (c *Client) GetPullRequestsForBranches(
