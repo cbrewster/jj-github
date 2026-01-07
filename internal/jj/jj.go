@@ -13,21 +13,58 @@ const (
 	logTemplate = `"{\"id\": \"" ++ change_id ++ "\", \"short_id\": \"" ++ change_id.shortest() ++ "\", \"commit_id\": \"" ++ commit_id ++ "\", \"immutable\": " ++ immutable ++ ", \"description\": " ++ json(description) ++ ", \"bookmarks\": " ++ json(bookmarks) ++ ", \"git_push_bookmark\": \"" ++ %s ++ "\", \"parents\": " ++ json(parents) ++ "}"`
 )
 
+// BookmarkInfo represents a jj bookmark with tracking information.
+type BookmarkInfo struct {
+	Name   string `json:"name"`
+	Remote string `json:"remote,omitempty"` // Empty if local-only, set if tracked
+}
+
 // Change represents a Jujutsu revision with its metadata.
 type Change struct {
-	ID              string `json:"id"`
-	ShortID         string `json:"short_id"`
-	CommitID        string `json:"commit_id"`
-	Immutable       bool   `json:"immutable"`
-	GitPushBookmark string `json:"git_push_bookmark"`
-	Description     string `json:"description"`
-	Bookmarks       []struct {
-		Name string `json:"name"`
-	} `json:"bookmarks"`
-	Parents []struct {
+	ID              string         `json:"id"`
+	ShortID         string         `json:"short_id"`
+	CommitID        string         `json:"commit_id"`
+	Immutable       bool           `json:"immutable"`
+	GitPushBookmark string         `json:"git_push_bookmark"`
+	Description     string         `json:"description"`
+	Bookmarks       []BookmarkInfo `json:"bookmarks"`
+	Parents         []struct {
 		ChangeID string `json:"change_id"`
 		CommitID string `json:"commit_id"`
 	} `json:"parents"`
+
+	// Branch is the computed effective branch name for this change.
+	// It prefers existing tracked bookmarks over the git_push_bookmark template.
+	// This is populated by ComputeEffectiveBranches().
+	Branch string `json:"-"`
+}
+
+// EffectiveBookmark returns the bookmark name to use for this change.
+// It prefers existing local bookmarks over the git_push_bookmark template.
+// A local bookmark is one without "@" in the name (remote-tracking refs look like "main@origin").
+// Returns an error if there are multiple local bookmarks (ambiguous).
+func (c *Change) EffectiveBookmark() (string, error) {
+	var localBookmarks []string
+	for _, b := range c.Bookmarks {
+		// A local bookmark doesn't have @ in the name
+		// Remote-tracking bookmarks look like "main@origin"
+		if !strings.Contains(b.Name, "@") {
+			localBookmarks = append(localBookmarks, b.Name)
+		}
+	}
+
+	switch len(localBookmarks) {
+	case 0:
+		// No local bookmarks, use the template-generated name
+		return c.GitPushBookmark, nil
+	case 1:
+		// Exactly one local bookmark, prefer it
+		return localBookmarks[0], nil
+	default:
+		// Multiple local bookmarks - ambiguous
+		return "", fmt.Errorf("revision %s has multiple local bookmarks (%s), cannot determine which to use",
+			c.ShortID, strings.Join(localBookmarks, ", "))
+	}
 }
 
 // GetChanges returns changes matching the given revsets in topological order.
@@ -69,6 +106,20 @@ func GetChanges(revsets ...string) ([]Change, error) {
 	}
 
 	return changes, nil
+}
+
+// ComputeEffectiveBranches populates the Branch field for each change.
+// It prefers existing tracked bookmarks over the git_push_bookmark template.
+// Returns an error if any change has ambiguous bookmarks.
+func ComputeEffectiveBranches(changes []Change) error {
+	for i := range changes {
+		branch, err := changes[i].EffectiveBookmark()
+		if err != nil {
+			return err
+		}
+		changes[i].Branch = branch
+	}
+	return nil
 }
 
 // GetTemplate returns a Jujutsu template value from the user's config.
