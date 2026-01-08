@@ -1,4 +1,4 @@
-package tui
+package submit
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	gogithub "github.com/google/go-github/v80/github"
 )
 
-// Phase represents the current phase of the sync workflow
+// Phase represents the current phase of the submit workflow
 type Phase int
 
 const (
@@ -80,6 +80,7 @@ type Model struct {
 
 	// Data from loading phase
 	changes       []jj.Change
+	trunkName     string
 	existingPRs   map[string]*gogithub.PullRequest
 	stackComments map[int]*gogithub.IssueComment
 }
@@ -133,6 +134,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.changes = msg.Changes
+		m.trunkName = msg.TrunkName
 		m.existingPRs = msg.ExistingPRs
 		m.stack = components.NewStack(msg.Changes, msg.TrunkName)
 		m.totalCount = len(m.stack.MutableRevisions())
@@ -218,13 +220,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the UI
 func (m Model) View() string {
 	var sb strings.Builder
-	
+
 	// Default terminal width if not yet received
 	width := m.width
 	if width == 0 {
 		width = 80 // default fallback
 	}
-	
+
 	viewOpts := components.ViewOptions{
 		RepoOwner: m.repo.Owner,
 		RepoName:  m.repo.Name,
@@ -288,7 +290,10 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 	return func() tea.Msg {
 		// First, load revisions to identify which branches to fetch
 		// (before fetching, to avoid updating trunk which could cause rebasing issues)
-		changes, err := jj.GetChanges(fmt.Sprintf("trunk()::(%s) & ~empty()", m.revset))
+		// Load revisions - include the immutable parent of the first mutable commit
+		// (for determining base branch) plus all commits in the revset.
+		// This works even if the revset is not directly on top of trunk().
+		changes, err := jj.GetChanges(fmt.Sprintf("(roots(%s & mutable())- | %s) & ~empty()", m.revset, m.revset))
 		if err != nil {
 			return RevisionsLoadedMsg{Err: err}
 		}
@@ -347,11 +352,18 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 
 		for _, change := range mutableChanges {
 			parent := changesByID[change.Parents[0].ChangeID]
-			base := parent.GitPushBookmark
-			if parent.Immutable {
+			var base string
+			if parent == nil {
+				// Parent not in our result set - use trunk as base
+				base = trunkName
+			} else if parent.Immutable {
 				if len(parent.Bookmarks) > 0 {
 					base = parent.Bookmarks[0].Name
+				} else {
+					base = trunkName
 				}
+			} else {
+				base = parent.GitPushBookmark
 			}
 
 			title, body, _ := strings.Cut(change.Description, "\n")
@@ -427,6 +439,7 @@ func (m Model) syncRevisionPRCmd(change jj.Change) tea.Cmd {
 		m.stack.SetRevisionState(change.ID, components.StateInProgress, "Creating PR...")
 	}
 
+	trunkName := m.trunkName
 	return func() tea.Msg {
 		// Build the PR options
 		changesByID := make(map[string]*jj.Change)
@@ -435,11 +448,18 @@ func (m Model) syncRevisionPRCmd(change jj.Change) tea.Cmd {
 		}
 
 		parent := changesByID[change.Parents[0].ChangeID]
-		base := parent.GitPushBookmark
-		if parent.Immutable {
+		var base string
+		if parent == nil {
+			// Parent not in our result set - use trunk as base
+			base = trunkName
+		} else if parent.Immutable {
 			if len(parent.Bookmarks) > 0 {
 				base = parent.Bookmarks[0].Name
+			} else {
+				base = trunkName
 			}
+		} else {
+			base = parent.GitPushBookmark
 		}
 
 		title, body, _ := strings.Cut(change.Description, "\n")
