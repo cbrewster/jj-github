@@ -301,12 +301,10 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 			return RevisionsLoadedMsg{Err: err}
 		}
 
-		// Determine trunk name
-		trunkName := "main"
-		if len(changes) > 0 && changes[0].Immutable {
-			if len(changes[0].Bookmarks) > 0 {
-				trunkName = changes[0].Bookmarks[0].Name
-			}
+		// Determine trunk name using jj's trunk() revset
+		trunkName, err := jj.GetTrunkName()
+		if err != nil {
+			return RevisionsLoadedMsg{Err: fmt.Errorf("get trunk name: %w", err)}
 		}
 
 		// Collect branches for mutable changes
