@@ -136,6 +136,21 @@ func (c *Client) UpdatePullRequest(
 	return err
 }
 
+// UpdatePullRequestBase updates only the base branch of a pull request.
+func (c *Client) UpdatePullRequestBase(
+	ctx context.Context,
+	repo Repo,
+	number int,
+	base string,
+) error {
+	_, _, err := c.client.PullRequests.Edit(ctx, repo.Owner, repo.Name, number, &github.PullRequest{
+		Base: &github.PullRequestBranch{
+			Ref: &base,
+		},
+	})
+	return err
+}
+
 // CreatePullRequestComment adds a comment to a pull request.
 func (c *Client) CreatePullRequestComment(
 	ctx context.Context,
@@ -159,6 +174,29 @@ func (c *Client) UpdatePullRequestComment(
 	_, _, err := c.client.Issues.EditComment(ctx, repo.Owner, repo.Name, commentID, &github.IssueComment{
 		Body: &body,
 	})
+	return err
+}
+
+// GetPullRequest fetches a single pull request by number.
+// This is useful for checking the PR's mergeable status before merging.
+func (c *Client) GetPullRequest(
+	ctx context.Context,
+	repo Repo,
+	number int,
+) (*github.PullRequest, error) {
+	pr, _, err := c.client.PullRequests.Get(ctx, repo.Owner, repo.Name, number)
+	return pr, err
+}
+
+// MergePullRequest merges a pull request.
+// It uses the repository's default merge method.
+func (c *Client) MergePullRequest(
+	ctx context.Context,
+	repo Repo,
+	number int,
+	commitTitle string,
+) error {
+	_, _, err := c.client.PullRequests.Merge(ctx, repo.Owner, repo.Name, number, commitTitle, nil)
 	return err
 }
 

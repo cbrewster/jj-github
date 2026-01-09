@@ -233,3 +233,34 @@ func GetTrunkName() (string, error) {
 	}
 	return "main", nil // Default fallback
 }
+
+// StackInfo contains changes and trunk info for a revision stack.
+type StackInfo struct {
+	Changes   []Change
+	TrunkName string
+}
+
+// GetStackInfo loads a stack of revisions for a revset.
+// Includes the immutable parent of the first mutable commit (for determining base branch)
+// plus all mutable commits in the revset. Empty commits are excluded.
+// TrunkName is provided as a fallback when the base branch cannot be determined from bookmarks.
+func GetStackInfo(revset string) (StackInfo, error) {
+	// Load revisions - include the immutable parent of the first mutable commit
+	// (for determining base branch) plus all commits in the revset.
+	// This works even if the revset is not directly on top of trunk().
+	changes, err := GetChanges(fmt.Sprintf("(roots(::(%s) & mutable())- | ::(%s) & mutable()) & ~empty()", revset, revset))
+	if err != nil {
+		return StackInfo{}, err
+	}
+
+	// Determine trunk name using jj's trunk() revset
+	trunkName, err := GetTrunkName()
+	if err != nil {
+		return StackInfo{}, fmt.Errorf("get trunk name: %w", err)
+	}
+
+	return StackInfo{
+		Changes:   changes,
+		TrunkName: trunkName,
+	}, nil
+}
