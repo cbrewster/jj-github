@@ -12,6 +12,7 @@ import (
 
 	"github.com/cbrewster/jj-github/internal/github"
 	"github.com/cbrewster/jj-github/internal/jj"
+	"github.com/cbrewster/jj-github/internal/tui/merge"
 	"github.com/cbrewster/jj-github/internal/tui/submit"
 	"github.com/cbrewster/jj-github/internal/tui/sync"
 )
@@ -38,6 +39,24 @@ func main() {
 						revset = c.Args().First()
 					}
 					return runSubmit(c.Context, revset)
+				},
+			},
+			{
+				Name:      "merge",
+				Usage:     "Merge PRs one by one, syncing after each merge",
+				ArgsUsage: "[revset]",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:  "no-wait",
+						Usage: "Fail immediately if any PR is not mergeable (instead of polling until ready)",
+					},
+				},
+				Action: func(c *cli.Context) error {
+					revset := "@"
+					if c.Args().First() != "" {
+						revset = c.Args().First()
+					}
+					return runMerge(c.Context, revset, c.Bool("no-wait"))
 				},
 			},
 		},
@@ -79,6 +98,31 @@ func runSubmit(ctx context.Context, revset string) error {
 	}
 
 	model := submit.NewModel(ctx, gh, repo, revset)
+	p := tea.NewProgram(model)
+	_, err = p.Run()
+	return err
+}
+
+func runMerge(ctx context.Context, revset string, noWait bool) error {
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	gh, err := github.NewClient()
+	if err != nil {
+		return fmt.Errorf("creating GitHub client: %w", err)
+	}
+
+	remote, err := jj.GetRemote("origin")
+	if err != nil {
+		return fmt.Errorf("getting remote: %w", err)
+	}
+
+	repo, err := github.GetRepoFromRemote(remote)
+	if err != nil {
+		return fmt.Errorf("parsing remote: %w", err)
+	}
+
+	model := merge.NewModel(ctx, gh, repo, revset, noWait)
 	p := tea.NewProgram(model)
 	_, err = p.Run()
 	return err
