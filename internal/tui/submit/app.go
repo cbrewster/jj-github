@@ -296,17 +296,15 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 		// Load revisions - include the immutable parent of the first mutable commit
 		// (for determining base branch) plus all commits in the revset.
 		// This works even if the revset is not directly on top of trunk().
-		changes, err := jj.GetChanges(fmt.Sprintf("(roots(%s & mutable())- | %s) & ~empty()", m.revset, m.revset))
+		changes, err := jj.GetChanges(fmt.Sprintf("(roots(::(%s) & mutable())- | ::(%s) & mutable()) & ~empty()", m.revset, m.revset))
 		if err != nil {
 			return RevisionsLoadedMsg{Err: err}
 		}
 
-		// Determine trunk name
-		trunkName := "main"
-		if len(changes) > 0 && changes[0].Immutable {
-			if len(changes[0].Bookmarks) > 0 {
-				trunkName = changes[0].Bookmarks[0].Name
-			}
+		// Determine trunk name using jj's trunk() revset
+		trunkName, err := jj.GetTrunkName()
+		if err != nil {
+			return RevisionsLoadedMsg{Err: fmt.Errorf("get trunk name: %w", err)}
 		}
 
 		// Collect branches for mutable changes
