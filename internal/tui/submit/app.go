@@ -296,7 +296,7 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 		// Load revisions - include the immutable parent of the first mutable commit
 		// (for determining base branch) plus all commits in the revset.
 		// This works even if the revset is not directly on top of trunk().
-		changes, err := jj.GetChanges(fmt.Sprintf("(roots(%s & mutable())- | %s) & ~empty()", m.revset, m.revset))
+		changes, err := jj.GetChanges(fmt.Sprintf("(roots(::(%s) & mutable())- | ::(%s) & mutable()) & ~empty()", m.revset, m.revset))
 		if err != nil {
 			return RevisionsLoadedMsg{Err: err}
 		}
