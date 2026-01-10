@@ -288,11 +288,6 @@ func (m Model) View() string {
 
 func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 	return func() tea.Msg {
-		// Fetch from remote to get latest state (read-only for local repo)
-		if err := jj.GitFetch(); err != nil {
-			return RevisionsLoadedMsg{Err: fmt.Errorf("git fetch: %w", err)}
-		}
-
 		// Load revisions - include the immutable parent of the first mutable commit
 		// (for determining base branch) plus all commits in the revset.
 		// This works even if the revset is not directly on top of trunk().
@@ -315,6 +310,13 @@ func (m Model) loadRevisionsAndPRsCmd() tea.Cmd {
 				branches = append(branches, change.GitPushBookmark)
 				mutableChanges = append(mutableChanges, change)
 			}
+		}
+
+		// Fetch only mutable bookmarks from remote to get latest state.
+		// We deliberately avoid fetching trunk to prevent confusion when
+		// changes are not based on the latest trunk.
+		if err := jj.GitFetchBranches(branches); err != nil {
+			return RevisionsLoadedMsg{Err: fmt.Errorf("git fetch: %w", err)}
 		}
 
 		if len(mutableChanges) == 0 {
