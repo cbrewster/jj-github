@@ -117,6 +117,21 @@ func GitFetch() error {
 	return exec.Command("jj", "git", "fetch").Run()
 }
 
+// GitFetchBranches fetches only the specified branches from the Git remote.
+// This is useful when you want to avoid fetching trunk or other branches.
+func GitFetchBranches(branches []string) error {
+	if len(branches) == 0 {
+		return nil
+	}
+
+	args := []string{"git", "fetch"}
+	for _, branch := range branches {
+		args = append(args, "--branch", branch)
+	}
+
+	return exec.Command("jj", args...).Run()
+}
+
 // Bookmark represents a jj bookmark with its associated revision.
 type Bookmark struct {
 	Name        string `json:"name"`
